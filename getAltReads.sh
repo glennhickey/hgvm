@@ -5,7 +5,7 @@
 # All coordinates are 1-based
 # Writes one bam per region, named after the region, in the reads directory.
 
-set -e
+set -ex
 
 # Where does the output go?
 OUT_DIR="reads"
@@ -98,12 +98,21 @@ do
             samtools view -b -o "${BAM_DIR}/${BAM_NUMBER}.bam" "${SAMPLE_URL}" "${RANGE}"
         
             # Move on to the next range
-            ((BAM_NUMBER++))
+            BAM_NUMBER=$((BAM_NUMBER + 1))
         done
     }
 
-    echo "Concatenating ${BAM_NUMBER} bams into ${OUT_DIR}/${REGION}.bam..."
-    samtools cat -o "${OUT_DIR}/${REGION}.bam" "${BAM_DIR}"/*
+    if [[ `ls -1 "${BAM_DIR}" | wc -l` == "1" ]]
+    then
+        echo "Moving ${BAM_NUMBER} bam into ${OUT_DIR}/${REGION}.bam..."
+        mv "${BAM_DIR}/0.bam" "${OUT_DIR}/${REGION}.bam"
+    else
+        # We can only samtools cat with 2 or more files
+        echo "Concatenating ${BAM_NUMBER} bams into ${OUT_DIR}/${REGION}.bam..."
+        samtools cat -o "${OUT_DIR}/${REGION}.bam" "${BAM_DIR}"/*
+    fi
+
+    
     
     # Clean up the temporary bams
     rm -rf "${BAM_DIR}"
