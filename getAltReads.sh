@@ -70,7 +70,8 @@ function get_region {
             echo "chr${CHROMOSOME}:${CHR_START}-${CHR_STOP}"
             
             # Rewrite the actual alts names from GL000251.2 into chr6_GL000251v2_alt format and announce them.
-            cat "${REGION_ALTS}" | cut -f4,5,6 | sed 's/\./v/' | awk "BEGIN {FS=\"\\t\"} {print \"chr${CHROMOSOME}_\" \$1 \"_alt:\" \$2 \"-\" \$3}"
+            # TODO: This sample doesn't actually have an index covering any alts.
+            #cat "${REGION_ALTS}" | cut -f4,5,6 | sed 's/\./v/' | awk "BEGIN {FS=\"\\t\"} {print \"chr${CHROMOSOME}_\" \$1 \"_alt:\" \$2 \"-\" \$3}"
             
             # Clean up the temp file
             rm -f "${REGION_ALTS}"

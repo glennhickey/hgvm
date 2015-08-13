@@ -44,9 +44,9 @@ do
     BAM_FILE="reads/${REGION^^}.bam"
     
     samtools sort -n "${BAM_FILE}" "${WORK_DIR}/reads-by-name"
-    bedtools bamtofastq -i "${WORK_DIR}/reads-by-name.bam" -fq "${WORK_DIR}/reads.1.fq" -fq2 "${WORK_DIR}/reads.2.fq"
+    bedtools bamtofastq -i "${WORK_DIR}/reads-by-name.bam" -fq "${WORK_DIR}/reads.1.fq" -fq2 "${WORK_DIR}/reads.2.fq" 2>/dev/null
     
-    vg map -f reads.1.fq -f reads.2.fq "${WORK_DIR}/${BASENAME}.vg" > "${WORK_DIR}/${BASENAME}.gam"
+    vg map -f "${WORK_DIR}/reads.1.fq" -f "${WORK_DIR}/reads.2.fq" "${WORK_DIR}/${BASENAME}.vg" > "${WORK_DIR}/${BASENAME}.gam"
     vg surject -p ref -d "${WORK_DIR}/${BASENAME}.vg.index" -b "${WORK_DIR}/${BASENAME}.gam" > "${WORK_DIR}/${BASENAME}.bam"
     vg view -aj "${WORK_DIR}/${BASENAME}.gam" | jq '.score' | grep -v "null" > "${BASENAME}.scores.tsv"
     
