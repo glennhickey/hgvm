@@ -41,7 +41,7 @@ do
     
     # If we have already downloaded reads for the regions, they will be here.
     # Upper-case the region name and add .bam.
-    BAM_FILE="${REGION^^}.bam"
+    BAM_FILE="reads/${REGION^^}.bam"
     
     samtools sort -n "${BAM_FILE}" "${WORK_DIR}/reads-by-name"
     bedtools bamtofastq -i "${WORK_DIR}/reads-by-name.bam" -fq "${WORK_DIR}/reads.1.fq" -fq2 "${WORK_DIR}/reads.2.fq"
