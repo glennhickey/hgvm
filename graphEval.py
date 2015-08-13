@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 from __future__ import print_function,division
-import urllib2, json, argparse, sys
+import urllib2, json, argparse, sys, glob
 from collections import OrderedDict, defaultdict
 from itertools import izip
 
@@ -27,9 +27,15 @@ def getAlleles(url):
 			json_=json.loads(text)
 			id_=int(json_['id'])
 			name=json_['name'].split('.')[-1]
-			if name=='ref':
+			print(name)
+			if name in ['ref','GRCh38:0','GRCh38_2c5:0']:
 				refReached=True
-			if refReached:
+				name='ref'
+			# elif not name.startswith('hu'):
+			# 	pass
+			# else:
+			# 	break
+			if refReached: #and not name.startswith('hu'):
 				variantSetID=json_['variantSetId']
 				path=json_['path']
 				segments=path['segments']
@@ -49,7 +55,8 @@ def getAlleles(url):
 					allelePathItemList.append(allelePathItem)
 				alleleDict[name]=allelePathItemList
 		except urllib2.HTTPError:
-			success=False
+			if alleleNumber>0:
+				success=False
 	return alleleDict
 
 def maf2Indices(inputFile):
@@ -180,6 +187,7 @@ def mergeRefItems(refPathList):
 	lists of tuples corresponding to base-index-ranges of each sequence that 
 	the reference allele spans.
 	"""
+	print("Merging segments in reference allele...")
 	unmergedRefDict=defaultdict(list)
 	refDict=defaultdict(list)
 	for pathItem in refPathList:
@@ -224,7 +232,7 @@ def getRefOverlap(allelePathItemList,refDict):
 			segEnd=segStart-segLength+1
 		segStart,segEnd=sorted([segStart,segEnd])
 		for refStart,refEnd in refDict[segSeq]:
-			if not ((segStart<refStart and segEnd<refEnd) or (segStart>refStart and segEnd>refEnd)):
+			if not (segEnd<refStart or segStart>refEnd):
 				if segStart>=refStart and segEnd<=refEnd:
 					overlapLength+=segLength
 				elif segStart<=refStart and segEnd>=refEnd:
@@ -232,9 +240,27 @@ def getRefOverlap(allelePathItemList,refDict):
 				elif segStart<=refStart and segEnd>=refStart:
 					overlapLength+=segEnd-refStart+1
 				elif segStart<=refEnd and segEnd>=refEnd:
-					overlapLength+=segEnd-refEnd+1
+					overlapLength+=refEnd-segStart+1
 	refOverlapFraction=overlapLength/totalLength
+	# print("Total length is {}".format(totalLength))
+	# print("Total overlap length is {}".format(overlapLength))
 	return refOverlapFraction
+
+def getGenesFromBed(bedFile):
+	"""
+	Takes a directory of directories, each containing a single bed file, and returns
+	a dict where keys are indices and values are lists of genes.
+	"""
+	geneMap=defaultdict(set)
+	with open(bedFile) as inputFile:
+		for line in inputFile:
+			line=line.strip().split()
+			start=int(line[1])
+			end=int(line[2])
+			gene=line[3]
+			for index in range(start,end+1):
+				geneMap[index].add(gene)
+	return geneMap
 
 def parseArgs():
 	parser = argparse.ArgumentParser(description="""Performs the specified evaluation on a specified graph server.
@@ -248,21 +274,21 @@ def parseArgs():
 		to the corresponding graph-alignments in a separate MAF file.  Requires the name of the maf file.  
 		Assumes the reference allele is named 'ref' or 'ref.ref'.  Also currently assumes the MAF only contains
 		a single block.""")
+	parser.add_argument('--gene',help="""For each alignment-column in a graph, and given
+		a directory containing a bed file for each path in the graph, computes the number of ortholog and paralog alignments.""")
 	args = parser.parse_args()
 	return args
 
-
 def main():
 	args=parseArgs()
-
 	if args.align2ref:
 		alleleDict=getAlleles(args.url)
 		refAllele=alleleDict['ref']
 		refDict=mergeRefItems(refAllele)
-		for id_,allele in alleleDict.items():
+		print("Computing overlap with reference allele...")
+		for id_,allele in sorted(alleleDict.items()):
 			refOverlapFraction=getRefOverlap(allele,refDict)
-			print(refOverlapFraction)
-
+			print("{}\t{}".format(id_,refOverlapFraction))
 	elif args.maf:
 		alleleDict=getAlleles(args.url)
 		graphAltDict=graph2Indices(alleleDict)
@@ -301,6 +327,35 @@ def main():
 			aveRecall=0
 			print("ZeroDivisionError when computing average recall.")
 		print("Overall\nPrecision: {:.3f}\nRecall: {:.3f}".format(avePrecision,aveRecall))
+	elif args.gene:
+		alleleDict=getAlleles(args.url)
+		graphAltDict=graph2Indices(alleleDict)
+		refGeneDict=getGenesFromBed(args.gene+'/'+'ref'+'/genes.bed')
+		for allele,indexList in graphAltDict.iteritems():
+			altGeneDict=getGenesFromBed(args.gene+'/'+allele+'/genes.bed')
+			# print(allele+":")
+			#For each base in the alt
+			#	check if there are any genes in the alt, and any genes in the index of the ref it's aligned to
+			#	If there are genes in both
+			#		If they're the same genes (or perhaps more), then count it as an ortholog alignment
+			#		If they're different genes, then count it as a paralog alignment
+			paralogCount=0
+			orthologCount=0
+			for altIndex,refIndex in enumerate(indexList):
+				if refIndex<0:
+					refIndex=-refIndex
+				refIndex-=1
+				if altIndex in altGeneDict and refIndex in refGeneDict:
+					altGenes=altGeneDict[altIndex]
+					refGenes=refGeneDict[refIndex]
+					if altGenes&refGenes:
+						orthologCount+=1
+					else:
+						paralogCount+=1
+			# print("Number bases with orthologous ref mappings:"+str(orthologCount))
+			# print("Number bases with paralogous ref mappings:"+str(paralogCount))
+			print(allele+'\t'+str(orthologCount)+'\t'+str(paralogCount))
+
 	else:
 		print("Please specify an evaluation option.")
 
