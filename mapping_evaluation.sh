@@ -27,46 +27,38 @@ do
     BASENAME=$(echo "${BASE_URL}" | sed 's/.*\/\(.*\)\/$/\1/')
     echo "Testing ${BASENAME}"
 
+    # Make a temp dir
+    WORK_DIR=$(mktemp -d)
+
     # Work out the real URL
     URL="${BASE_URL}${VERSION}/"
     
     # Get the graph
-    sg2vg "${URL}" | vg view -Jv - | vg ids -s - > "${BASENAME}.vg"
+    sg2vg "${URL}" | vg view -Jv - | vg ids -s - > "${WORK_DIR}/${BASENAME}.vg"
     
     # Index it
-    rm -Rf "${BASENAME}.vg.index/"
-    vg index -s -k10 "${BASENAME}.vg"
+    vg index -s -k10 "${WORK_DIR}/${BASENAME}.vg"
     
-    # Get different reads for different regions
-    if [[ "${REGION}" == "brca1" ]]
-    then
-        # BRCA reads from http://web.stanford.edu/~quake/brca/ for now
-        # H. Christina Fan et al., Non-invasive Prenatal Measurement of the Fetal Genome, 487 Nature 320 (2012);
-        rm -f P028T1-Cell.Free.DNA.BRCA1.bam
-        wget http://www.stanford.edu/~quake/brca/P028T1-Cell.Free.DNA.BRCA1.bam
-        samtools sort -n P028T1-Cell.Free.DNA.BRCA1.bam reads-by-name
-        bedtools bamtofastq -i reads-by-name.bam -fq reads.1.fq -fq2 reads.2.fq
-    elif [[ "${REGION}" == "brca2" ]]
-    then
-        rm -f P028T1-Cell.Free.DNA.BRCA2.bam
-        wget http://www.stanford.edu/~quake/brca/P028T1-Cell.Free.DNA.BRCA2.bam
-        samtools sort -n P028T1-Cell.Free.DNA.BRCA2.bam reads-by-name
-        bedtools bamtofastq -i reads-by-name.bam -fq reads.1.fq -fq2 reads.2.fq
-    else 
-        echo "No read data available for ${REGION}"
-        continue
-    fi
+    # If we have already downloaded reads for the regions, they will be here.
+    # Upper-case the region name and add .bam.
+    BAM_FILE="${REGION^^}.bam"
     
-    vg map -f reads.1.fq -f reads.2.fq "${BASENAME}.vg" > "${BASENAME}.gam"
-    vg surject -p ref -d "${BASENAME}.vg.index" -b "${BASENAME}.gam" > "${BASENAME}.bam"
-    vg view -aj "${BASENAME}.gam" | jq '.score' | grep -v "null" > "${BASENAME}.scores.txt"
+    samtools sort -n "${BAM_FILE}" "${WORK_DIR}/reads-by-name"
+    bedtools bamtofastq -i "${WORK_DIR}/reads-by-name.bam" -fq "${WORK_DIR}/reads.1.fq" -fq2 "${WORK_DIR}/reads.2.fq"
     
-    histogram.py "${BASENAME}.scores.txt" \
+    vg map -f reads.1.fq -f reads.2.fq "${WORK_DIR}/${BASENAME}.vg" > "${WORK_DIR}/${BASENAME}.gam"
+    vg surject -p ref -d "${WORK_DIR}/${BASENAME}.vg.index" -b "${WORK_DIR}/${BASENAME}.gam" > "${WORK_DIR}/${BASENAME}.bam"
+    vg view -aj "${WORK_DIR}/${BASENAME}.gam" | jq '.score' | grep -v "null" > "${BASENAME}.scores.tsv"
+    
+    ./histogram.py "${BASENAME}.scores.tsv" \
         --title "${BASENAME}" \
         --x_label "Score" \
         --y_label "Read Count" \
         --x_min 0 --x_max 210 \
         --bins 20 --line \
         --save "${BASENAME}.png"
+        
+    # No slashes here so we are protected against variable typos
+    rm -rf "${WORK_DIR}"
     
 done
