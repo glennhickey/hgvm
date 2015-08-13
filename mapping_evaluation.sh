@@ -2,7 +2,7 @@
 # mapping_evaluation.sh: do an evaluation of the GA4GH bake-off graphs
 # Pipe your server list TSV to the input.
 # Format: <region>\t<url>\t<contributor>[\t...] 
-set -ex
+set -e
 
 # We need to append the server version to the URLs and the input TSV won't have it.
 VERSION="v0.6.g"
@@ -10,6 +10,11 @@ VERSION="v0.6.g"
 # Skip the header. TODO: Make sure someone doesn't forget and have their first
 # input be silently discarded.
 read
+
+mkdir -p alignments
+mkdir -p scores
+mkdir -p plots
+mkdir -p graphs
 
 while read -r REGION BASE_URL CONTRIBUTOR
 do
@@ -25,7 +30,7 @@ do
     # submission name from the BASE_URL. It's the part between the last two
     # slashes.
     BASENAME=$(echo "${BASE_URL}" | sed 's/.*\/\(.*\)\/$/\1/')
-    echo "Testing ${BASENAME}"
+    echo "`date`: Testing ${BASENAME}"
 
     # Make a temp dir
     WORK_DIR=$(mktemp -d)
@@ -33,30 +38,39 @@ do
     # Work out the real URL
     URL="${BASE_URL}${VERSION}/"
     
-    # Get the graph
-    sg2vg "${URL}" | vg view -Jv - | vg ids -s - > "${WORK_DIR}/${BASENAME}.vg"
+    # Get the graph, chop it to remove overly long sequences, and topologically sort and number it.
+    echo "`date`: Getting graph..."
+    sg2vg "${URL}" | vg view -Jv - | vg mod -X 100 - | vg ids -s - > "graphs/${BASENAME}.vg"
     
     # Index it
-    vg index -s -k10 "${WORK_DIR}/${BASENAME}.vg"
+    echo "`date`: Indexing..."
+    rm -rf "graphs/${BASENAME}.vg.index/"
+    vg index -s -k10 "graphs/${BASENAME}.vg"
     
     # If we have already downloaded reads for the regions, they will be here.
     # Upper-case the region name and add .bam.
     BAM_FILE="reads/${REGION^^}.bam"
     
+    echo "`date`: Extracting reads to align..."
     samtools sort -n "${BAM_FILE}" "${WORK_DIR}/reads-by-name"
     bedtools bamtofastq -i "${WORK_DIR}/reads-by-name.bam" -fq "${WORK_DIR}/reads.1.fq" -fq2 "${WORK_DIR}/reads.2.fq" 2>/dev/null
     
-    vg map -f "${WORK_DIR}/reads.1.fq" -f "${WORK_DIR}/reads.2.fq" "${WORK_DIR}/${BASENAME}.vg" > "${WORK_DIR}/${BASENAME}.gam"
-    vg surject -p ref -d "${WORK_DIR}/${BASENAME}.vg.index" -b "${WORK_DIR}/${BASENAME}.gam" > "${WORK_DIR}/${BASENAME}.bam"
-    vg view -aj "${WORK_DIR}/${BASENAME}.gam" | jq '.score' | grep -v "null" > "${BASENAME}.scores.tsv"
+    echo "`date`: Mapping..."
+    time vg map -f "${WORK_DIR}/reads.1.fq" -f "${WORK_DIR}/reads.2.fq" "graphs/${BASENAME}.vg" > "alignments/${BASENAME}.gam"
     
-    ./histogram.py "${BASENAME}.scores.tsv" \
+    echo "`date`: Surjecting..."
+    vg surject -p ref -d "graphs/${BASENAME}.vg.index" -b "alignments/${BASENAME}.gam" > "alignments/${BASENAME}.bam"
+    echo "`date`: Extracting scores..."
+    vg view -aj "alignments/${BASENAME}.gam" | jq '.score' | grep -v "null" > "scores/${BASENAME}.scores.tsv"
+    
+    echo "`date`: Plotting..."
+    ./histogram.py "scores/${BASENAME}.scores.tsv" \
         --title "${BASENAME}" \
         --x_label "Score" \
         --y_label "Read Count" \
-        --x_min 0 --x_max 210 \
+        --x_min 0 \
         --bins 20 --line \
-        --save "${BASENAME}.png"
+        --save "plots/${BASENAME}.png"
         
     # No slashes here so we are protected against variable typos
     rm -rf "${WORK_DIR}"
