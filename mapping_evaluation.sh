@@ -98,7 +98,7 @@ do
         --x_label "Score" \
         --y_label "Read Count" \
         --x_min 0 \
-        --bins 20 \
+        --bins 50 \
         --save "plots/${REGION}/scores/${BASENAME}.png"
         
     # Plot the perfect match fractions (better since not all reads are the same length)
@@ -107,7 +107,7 @@ do
         --x_label "Match Fraction" \
         --y_label "Read Count" \
         --x_min 0 \
-        --bins 20 \
+        --bins 50 \
         --save "plots/${REGION}/matches/${BASENAME}.png"
         
     # No slashes here so we are protected against variable typos
