@@ -115,6 +115,10 @@ def main(args):
     
     options = parse_args(args) # This holds the nicely-parsed options object
     
+    if __name__ == "__main__" :
+        # Re-import functions
+        from parallelMappingEvaluation import run_all_alignments, run_alignment
+    
     # Make a stack of jobs to run, starting with all our arguments.
     stack = jobTree.scriptTree.stack.Stack(
         jobTree.scriptTree.target.Target.makeTargetFn(
