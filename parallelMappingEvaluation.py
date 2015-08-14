@@ -54,11 +54,26 @@ def run_all_alignments(target, server_list):
 
     """
 
+    # Skip the header
+    next(server_list)
+
     for line in server_list:
+        # We need to read each non-header line
+        
+        # Break it into its fields
+        parts = line.split("\t")
+        
+        if(parts[0].startswith("#")):
+            # Skip comments
+            continue
+    
         # We cleverly just split the lines out to different nodes
         # Each process probably needs 240 GB of RAM and 32 cores
         target.addChildTargetFn(run_alignment, (line,), memory=240 * 2 ** 30,
             cpu=32)
+            
+        # Say what we did
+        target.logToMaster("Running child for {}".format(parts[1]))
         
 def run_alignment(target, line):
     """
