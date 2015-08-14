@@ -73,41 +73,58 @@ def run_all_alignments(target, server_list):
             continue
     
         # We cleverly just split the lines out to different nodes
-        # Each process probably needs 240 GB of RAM and 32 cores
-        target.addChildTargetFn(run_alignment, (line,), memory=240 * 2 ** 30,
-            cpu=32)
+        target.addChildTarget(RunAlignmentTarget(line))
             
         # Say what we did
         target.logToMaster("Running child for {}".format(parts[1]))
         
-def run_alignment(target, line):
+class RunAlignmentTarget(jobTree.scriptTree.target.Target):
     """
-    For the given line of the server list TSV, run the alignment and evaluate
-    it.
+    A target that runs a single server's alignment. Has to be a class since
+    target function targets get their CPU and memory ignored.
     
     """
-
-    print("Have {} memory, {} cpus".format(target.getMemory(), target.getCpu()))
-
-    # We cleverly cheat by just running our own personal instance of the
-    # mapping_evaluation.sh script, so all the real work is still done in bash
-    script = subprocess.Popen(["./mapping_evaluation.sh"],
-        stdin=subprocess.PIPE)
     
-    # Send it a fake first line for it to skip, and then the actual data.
-    script.stdin.write("fake_header\n" + line)
-    script.stdin.close()
-    script.wait()
-    
-    if script.returncode != 0:
-        # Fire off an error message
-        message = "Error: process on {} died with code {}".format(line.strip(), 
-            script.returncode)
-            
-        target.logToMaster(message)
-        raise RuntimeError(message)
+    def __init__(self, line):
+        """
+        Save the argument
         
-    target.logToMaster("Finished: {}".format(line))
+        """
+        
+        # Make the base Target. Request a whole ku machine
+        super(RunAlignmentTarget, self).__init__(memory=240 * 2 ** 30, cpu=32)
+        
+        # Save argument
+        self.line = line
+        
+    def run(self):
+        """
+        For the given line of the server list TSV, run the alignment and evaluate
+        it.
+        
+        """
+
+        print("Have {} memory, {} cpus".format(self.getMemory(), self.getCpu()))
+
+        # We cleverly cheat by just running our own personal instance of the
+        # mapping_evaluation.sh script, so all the real work is still done in bash
+        script = subprocess.Popen(["./mapping_evaluation.sh"],
+            stdin=subprocess.PIPE)
+        
+        # Send it a fake first line for it to skip, and then the actual data.
+        script.stdin.write("fake_header\n" + self.line)
+        script.stdin.close()
+        script.wait()
+        
+        if script.returncode != 0:
+            # Fire off an error message
+            message = "Error: process on {} died with code {}".format(
+                self.line.strip(), script.returncode)
+                
+            self.logToMaster(message)
+            raise RuntimeError(message)
+            
+        self.logToMaster("Finished: {}".format(self.line.strip()))
     
 def main(args):
     """
@@ -124,7 +141,8 @@ def main(args):
     
     if __name__ == "__main__" :
         # Re-import functions
-        from parallelMappingEvaluation import run_all_alignments, run_alignment
+        from parallelMappingEvaluation import run_all_alignments, \
+            RunAlignmentTarget
     
     # Make a stack of jobs to run, starting with all our arguments.
     stack = jobTree.scriptTree.stack.Stack(
