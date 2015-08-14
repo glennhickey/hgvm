@@ -54,10 +54,15 @@ def run_all_alignments(target, server_list):
 
     """
 
-    # Skip the header
-    next(server_list)
-
+    # Make sure we skip the header
+    is_first = True
+    
     for line in server_list:
+        if is_first:
+            # This is the header, skip it.
+            is_first = False
+            continue
+        
         # We need to read each non-header line
         
         # Break it into its fields
@@ -82,19 +87,21 @@ def run_alignment(target, line):
     
     """
 
+    print("Have {} memory, {} cpus".format(target.getMemory(), target.getCpu()))
+
     # We cleverly cheat by just running our own personal instance of the
     # mapping_evaluation.sh script, so all the real work is still done in bash
     script = subprocess.Popen(["./mapping_evaluation.sh"],
         stdin=subprocess.PIPE)
     
-    # Send it the line
-    # Make sure it has a line terimantor.
-    script.stdin.write(line + "/n")
+    # Send it a fake first line for it to skip, and then the actual data.
+    script.stdin.write("fake_header\n" + line)
     script.stdin.close()
+    script.wait()
     
-    if not script.wait():
+    if script.returncode != 0:
         # Fire off an error message
-        message = "Error: process on {} died with code {}".format(line, 
+        message = "Error: process on {} died with code {}".format(line.strip(), 
             script.returncode)
             
         target.logToMaster(message)
@@ -122,7 +129,8 @@ def main(args):
     # Make a stack of jobs to run, starting with all our arguments.
     stack = jobTree.scriptTree.stack.Stack(
         jobTree.scriptTree.target.Target.makeTargetFn(
-        run_all_alignments, (options.server_list,), memory=2 * 2 ** 30, cpu=1))
+        run_all_alignments, (list(options.server_list),), memory=2 * 2 ** 30,
+        cpu=1))
     
     print "Starting stack"
     

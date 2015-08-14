@@ -6,6 +6,8 @@
 
 set -e
 
+echo "`date`: Starting up on `hostname`..."
+
 # We need to append the server version to the URLs and the input TSV won't have it.
 VERSION="v0.6.g"
 
