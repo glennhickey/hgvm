@@ -18,7 +18,7 @@ mkdir -p stats
 mkdir -p plots
 mkdir -p graphs
 
-while read -r REGION BASE_URL CONTRIBUTOR
+while read -r REGION BASE_URL REST
 do
 
     if [[ ${REGION:0:1} == '#' ]]
@@ -83,8 +83,10 @@ do
         "matches": ([.path.mapping[].edit[] | select(.to_length == .from_length and .sequence == null) | .to_length] | add)
     } | .matches / .length' > "stats/${REGION}/${BASENAME}.matches.tsv"
     
-    # Work out how many perfect read mappings we have
-    cat "stats/${REGION}/${BASENAME}.matches.tsv" | grep '^1$' | wc -l > "stats/${REGION}/${BASENAME}.perfect.tsv"
+    # Work out how many perfect read mappings we have, so we can put it in the plot title
+    PERFECT_MAPPINGS=`cat "stats/${REGION}/${BASENAME}.matches.tsv" | grep '^1$' | wc -l`
+    # Keep the number around in a file too.
+    echo "${PERFECT_MAPPINGS}" > "stats/${REGION}/${BASENAME}.perfect.tsv"
     
     echo "`date`: Plotting..."
     mkdir -p "plots/${REGION}/scores"
@@ -92,7 +94,7 @@ do
     
     # Plot the scores
     ./histogram.py "stats/${REGION}/${BASENAME}.scores.tsv" \
-        --title "Read Mapping Scores for ${BASENAME} by ${CONTRIBUTOR}" \
+        --title "Mapping Scores for ${BASENAME}" \
         --x_label "Score" \
         --y_label "Read Count" \
         --x_min 0 \
@@ -101,7 +103,7 @@ do
         
     # Plot the perfect match fractions (better since not all reads are the same length)
     ./histogram.py "stats/${REGION}/${BASENAME}.matches.tsv" \
-        --title "Read Mapping Identity for ${BASENAME} by ${CONTRIBUTOR}" \
+        --title "Mapping Identity (${PERFECT_MAPPINGS} perfect) for ${BASENAME}" \
         --x_label "Match Fraction" \
         --y_label "Read Count" \
         --x_min 0 \
