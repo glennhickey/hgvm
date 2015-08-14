@@ -2,6 +2,8 @@
 # mapping_evaluation.sh: do an evaluation of the GA4GH bake-off graphs
 # Pipe your server list TSV to the input.
 # Format: <region>\t<url>\t<contributor>[\t...] 
+# Many copies of this script may be running in parallel.
+
 set -e
 
 # We need to append the server version to the URLs and the input TSV won't have it.
@@ -12,7 +14,7 @@ VERSION="v0.6.g"
 read
 
 mkdir -p alignments
-mkdir -p scores
+mkdir -p stats
 mkdir -p plots
 mkdir -p graphs
 
@@ -23,6 +25,12 @@ do
     then
         # Skip commented-out regions for broken servers
         # See <http://serverfault.com/a/249400> for pound sign weirdness
+        continue
+    fi
+    
+    if [[ "${REGION}x" == "x" ]]
+    then
+        # Skip blank lines
         continue
     fi
 
@@ -60,17 +68,45 @@ do
     
     echo "`date`: Surjecting..."
     vg surject -p ref -d "graphs/${BASENAME}.vg.index" -b "alignments/${BASENAME}.gam" > "alignments/${BASENAME}.bam"
+    
+    mkdir -p "stats/${REGION}"
+    
     echo "`date`: Extracting scores..."
-    vg view -aj "alignments/${BASENAME}.gam" | jq '.score' | grep -v "null" > "scores/${BASENAME}.scores.tsv"
+    vg view -aj "alignments/${BASENAME}.gam" | jq '.score' | grep -v "null" > "stats/${REGION}/${BASENAME}.scores.tsv"
+    
+    echo "`date`: Extracting match fractions..."
+    # Pull out the reads with non-null scores (i.e. that mapped), total up the
+    # length of all the edits that are perfect matches, and spit out the
+    # fraction of each read that is a perfect match
+    vg view -aj "alignments/${BASENAME}.gam" | jq -r 'select(.score != null) | {
+        "length": .sequence | length, 
+        "matches": ([.path.mapping[].edit[] | select(.to_length == .from_length and .sequence == null) | .to_length] | add)
+    } | .matches / .length' > "stats/${REGION}/${BASENAME}.matches.tsv"
+    
+    # Work out how many perfect read mappings we have
+    cat "stats/${REGION}/${BASENAME}.matches.tsv" | grep '^1$' | wc -l > "stats/${REGION}/${BASENAME}.perfect.tsv"
     
     echo "`date`: Plotting..."
-    ./histogram.py "scores/${BASENAME}.scores.tsv" \
-        --title "${BASENAME}" \
+    mkdir -p "plots/${REGION}/scores"
+    mkdir -p "plots/${REGION}/matches"
+    
+    # Plot the scores
+    ./histogram.py "stats/${REGION}/${BASENAME}.scores.tsv" \
+        --title "Read Mapping Scores for ${BASENAME} by ${CONTRIBUTOR}" \
         --x_label "Score" \
         --y_label "Read Count" \
         --x_min 0 \
-        --bins 20 --line \
-        --save "plots/${BASENAME}.png"
+        --bins 20 \
+        --save "plots/${REGION}/scores/${BASENAME}.png"
+        
+    # Plot the perfect match fractions (better since not all reads are the same length)
+    ./histogram.py "stats/${REGION}/${BASENAME}.matches.tsv" \
+        --title "Read Mapping Identity for ${BASENAME} by ${CONTRIBUTOR}" \
+        --x_label "Match Fraction" \
+        --y_label "Read Count" \
+        --x_min 0 \
+        --bins 20 \
+        --save "plots/${REGION}/matches/${BASENAME}.png"
         
     # No slashes here so we are protected against variable typos
     rm -rf "${WORK_DIR}"
