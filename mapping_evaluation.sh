@@ -20,6 +20,57 @@ mkdir -p stats
 mkdir -p plots
 mkdir -p graphs
 
+function run_stats {
+    # Call on a basename and a mode (real or sim)
+    local BASENAME="${1}"
+    local MODE="${2}"
+
+    local STATS_DIR="stats/${REGION}/${MODE}"
+    local ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
+
+    mkdir -p "${STATS_DIR}"
+
+    echo "`date`: Extracting scores..."
+    vg view -aj "${ALIGNMENT}" | jq '.score' | grep -v "null" > "${STATS_DIR}/${BASENAME}.scores.tsv"
+    
+    echo "`date`: Extracting match fractions..."
+    # Pull out the reads with non-null scores (i.e. that mapped), total up the
+    # length of all the edits that are perfect matches, and spit out the
+    # fraction of each read that is a perfect match
+    vg view -aj "${ALIGNMENT}" | jq -r 'select(.score != null) | {
+        "length": .sequence | length, 
+        "matches": ([.path.mapping[].edit[] | select(.to_length == .from_length and .sequence == null) | .to_length] | add)
+    } | .matches / .length' > "${STATS_DIR}/${BASENAME}.matches.tsv"
+    
+    # Work out how many perfect read mappings we have, so we can put it in the plot title
+    PERFECT_MAPPINGS=`cat "${STATS_DIR}/${BASENAME}.matches.tsv" | grep '^1$' | wc -l`
+    # Keep the number around in a file too.
+    echo "${PERFECT_MAPPINGS}" > "${STATS_DIR}/${BASENAME}.perfect.tsv"
+    
+    echo "`date`: Plotting..."
+    local PLOTS_DIR="plots/${MODE}/${REGION}"
+    mkdir -p "${PLOTS_DIR}/scores"
+    mkdir -p "${PLOTS_DIR}/matches"
+    
+    # Plot the scores
+    ./histogram.py "${STATS_DIR}/${BASENAME}.scores.tsv" \
+        --title "${MODE} Mapping Scores for ${BASENAME}" \
+        --x_label "Score" \
+        --y_label "Read Count" \
+        --x_min 0 \
+        --bins 50 \
+        --save "${PLOTS_DIR}/scores/${BASENAME}.png"
+        
+    # Plot the perfect match fractions (better since not all reads are the same length)
+    ./histogram.py "${STATS_DIR}/${BASENAME}.matches.tsv" \
+        --title "${MODE} Mapping Identity (${PERFECT_MAPPINGS} perfect) for ${BASENAME}" \
+        --x_label "Match Fraction" \
+        --y_label "Read Count" \
+        --x_min 0 \
+        --bins 50 \
+        --save "${PLOTS_DIR}/matches/${BASENAME}.png"
+}
+
 while read -r REGION BASE_URL REST
 do
 
@@ -57,6 +108,17 @@ do
     rm -rf "graphs/${BASENAME}.vg.index/"
     vg index -s -k10 "graphs/${BASENAME}.vg"
     
+    # Do the sim reads
+    SIM_FILE="reads/${REGION^^}.txt"
+    
+    echo "`date`: Aligning simulated reads..."
+    MODE="sim"
+    ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
+    
+    time vg map -r "${SIM_FILE}" "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+    
+    run_stats "${BASENAME}" "${MODE}"
+    
     # If we have already downloaded reads for the regions, they will be here.
     # Upper-case the region name and add .bam.
     BAM_FILE="reads/${REGION^^}.bam"
@@ -65,53 +127,17 @@ do
     samtools sort -n "${BAM_FILE}" "${WORK_DIR}/reads-by-name"
     bedtools bamtofastq -i "${WORK_DIR}/reads-by-name.bam" -fq "${WORK_DIR}/reads.1.fq" -fq2 "${WORK_DIR}/reads.2.fq" 2>/dev/null
     
-    echo "`date`: Mapping..."
-    time vg map -f "${WORK_DIR}/reads.1.fq" -f "${WORK_DIR}/reads.2.fq" "graphs/${BASENAME}.vg" > "alignments/${BASENAME}.gam"
+    MODE="real"
+    ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
+    
+    echo "`date`: Aligning real reads..."
+    time vg map -f "${WORK_DIR}/reads.1.fq" -f "${WORK_DIR}/reads.2.fq" "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+    
+    run_stats "${BASENAME}" "${MODE}"
     
     echo "`date`: Surjecting..."
     vg surject -p ref -d "graphs/${BASENAME}.vg.index" -b "alignments/${BASENAME}.gam" > "alignments/${BASENAME}.bam"
     
-    mkdir -p "stats/${REGION}"
-    
-    echo "`date`: Extracting scores..."
-    vg view -aj "alignments/${BASENAME}.gam" | jq '.score' | grep -v "null" > "stats/${REGION}/${BASENAME}.scores.tsv"
-    
-    echo "`date`: Extracting match fractions..."
-    # Pull out the reads with non-null scores (i.e. that mapped), total up the
-    # length of all the edits that are perfect matches, and spit out the
-    # fraction of each read that is a perfect match
-    vg view -aj "alignments/${BASENAME}.gam" | jq -r 'select(.score != null) | {
-        "length": .sequence | length, 
-        "matches": ([.path.mapping[].edit[] | select(.to_length == .from_length and .sequence == null) | .to_length] | add)
-    } | .matches / .length' > "stats/${REGION}/${BASENAME}.matches.tsv"
-    
-    # Work out how many perfect read mappings we have, so we can put it in the plot title
-    PERFECT_MAPPINGS=`cat "stats/${REGION}/${BASENAME}.matches.tsv" | grep '^1$' | wc -l`
-    # Keep the number around in a file too.
-    echo "${PERFECT_MAPPINGS}" > "stats/${REGION}/${BASENAME}.perfect.tsv"
-    
-    echo "`date`: Plotting..."
-    mkdir -p "plots/${REGION}/scores"
-    mkdir -p "plots/${REGION}/matches"
-    
-    # Plot the scores
-    ./histogram.py "stats/${REGION}/${BASENAME}.scores.tsv" \
-        --title "Mapping Scores for ${BASENAME}" \
-        --x_label "Score" \
-        --y_label "Read Count" \
-        --x_min 0 \
-        --bins 50 \
-        --save "plots/${REGION}/scores/${BASENAME}.png"
-        
-    # Plot the perfect match fractions (better since not all reads are the same length)
-    ./histogram.py "stats/${REGION}/${BASENAME}.matches.tsv" \
-        --title "Mapping Identity (${PERFECT_MAPPINGS} perfect) for ${BASENAME}" \
-        --x_label "Match Fraction" \
-        --y_label "Read Count" \
-        --x_min 0 \
-        --bins 50 \
-        --save "plots/${REGION}/matches/${BASENAME}.png"
-        
     # No slashes here so we are protected against variable typos
     rm -rf "${WORK_DIR}"
     

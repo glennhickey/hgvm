@@ -5,10 +5,13 @@
 # All coordinates are 1-based
 # Writes one bam per region, named after the region, in the reads directory.
 
-set -ex
+set -e
 
 # Where does the output go?
 OUT_DIR="reads"
+
+# Where are the graphs?
+GRAPH_DIR="graphs"
 
 # Point at the correct reference assembly
 ALT_URL="ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA_000001405.17_GRCh38.p2/GCA_000001405.17_GRCh38.p2_assembly_structure/all_alt_scaffold_placement.txt"
@@ -85,38 +88,74 @@ for REGION in BRCA1 BRCA2 MHC SMA LRC_KIR CENX
 do
     echo "Processing ${REGION}..."
 
-    # We need a temp directory to put all our per-range BAMs in
-    BAM_DIR=`mktemp -d`
-
-    get_region ${REGION} | 
-    {
-        # Each range is going to be 0.bam, 1.bam, 2.bam, etc.
-        BAM_NUMBER=0
-        while read RANGE
-        do
-            # Download the given range
-            echo "Downloading ${RANGE}..."
-            samtools view -b -o "${BAM_DIR}/${BAM_NUMBER}.bam" "${SAMPLE_URL}" "${RANGE}"
-        
-            # Move on to the next range
-            BAM_NUMBER=$((BAM_NUMBER + 1))
-        done
-    }
-
-    if [[ `ls -1 "${BAM_DIR}" | wc -l` == "1" ]]
+    if [[ ! -e "${OUT_DIR}/${REGION}.bam" ]]
     then
-        echo "Moving ${BAM_NUMBER} bam into ${OUT_DIR}/${REGION}.bam..."
-        mv "${BAM_DIR}/0.bam" "${OUT_DIR}/${REGION}.bam"
-    else
-        # We can only samtools cat with 2 or more files
-        echo "Concatenating ${BAM_NUMBER} bams into ${OUT_DIR}/${REGION}.bam..."
-        samtools cat -o "${OUT_DIR}/${REGION}.bam" "${BAM_DIR}"/*
-    fi
 
+        # We need a temp directory to put all our per-range BAMs in
+        BAM_DIR=`mktemp -d`
+
+        get_region ${REGION} | 
+        {
+            # Each range is going to be 0.bam, 1.bam, 2.bam, etc.
+            BAM_NUMBER=0
+            while read RANGE
+            do
+                # Download the given range
+                echo "Downloading ${RANGE}..."
+                samtools view -b -o "${BAM_DIR}/${BAM_NUMBER}.bam" "${SAMPLE_URL}" "${RANGE}"
+            
+                # Move on to the next range
+                BAM_NUMBER=$((BAM_NUMBER + 1))
+            done
+        }
+
+        if [[ `ls -1 "${BAM_DIR}" | wc -l` == "1" ]]
+        then
+            echo "Moving ${BAM_NUMBER} bam into ${OUT_DIR}/${REGION}.bam..."
+            mv "${BAM_DIR}/0.bam" "${OUT_DIR}/${REGION}.bam"
+        else
+            # We can only samtools cat with 2 or more files
+            echo "Concatenating ${BAM_NUMBER} bams into ${OUT_DIR}/${REGION}.bam..."
+            samtools cat -o "${OUT_DIR}/${REGION}.bam" "${BAM_DIR}"/*
+        fi
+        # Clean up the temporary bams
+        rm -rf "${BAM_DIR}"
+    else
+        echo "${OUT_DIR}/${REGION}.bam already created."
+    fi
     
+    if [[ "${REGION}" == "CENX" ]]
+    then
+        # Don't go looking for trivial_cenx because it isn't real.
+        # TODO: Use lowest level?
+        continue
+    fi
     
-    # Clean up the temporary bams
-    rm -rf "${BAM_DIR}"
+    # What's the trivial graph?
+    TRIVIAL_GRAPH="${GRAPH_DIR}/trivial-${REGION,,}.vg"
+    
+    # Now get the trivial graph if it doesn't exist
+    if [[ ! -e "${TRIVIAL_GRAPH}" ]]
+    then
+        # Go download it from the trivial URL
+        TRIVIAL_URL="http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/trivial-${REGION,,}/v0.6.g/"
+        
+        echo "Downloading ${TRIVIAL_GRAPH}..."
+        
+        # TODO: keep in sync with graph download in mapping_evaluation
+        sg2vg "${TRIVIAL_URL}" | vg view -Jv - | vg mod -X 100 - | vg ids -s - > "${TRIVIAL_GRAPH}"
+    else
+        echo "${TRIVIAL_GRAPH} already created..."
+    fi
+    
+    if [[ ! -e "${OUT_DIR}/trivial-${REGION}.txt" ]]
+    then
+        # Simulate some kmers
+        echo "Simulating reads into ${OUT_DIR}/trivial-${REGION}.txt..."
+        vg sim -s 1337 -n 10000 -l 250 ${TRIVIAL_GRAPH} > "${OUT_DIR}/trivial-${REGION}.txt"
+    else
+        echo "${OUT_DIR}/trivial-${REGION}.txt already created"
+    fi
 done
 
 # What we were doing originally:
