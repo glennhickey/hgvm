@@ -4,7 +4,7 @@
 # Format: <region>\t<url>\t<contributor>[\t...] 
 # Many copies of this script may be running in parallel.
 
-set -e
+set -ex
 
 echo "`date`: Starting up on `hostname`..."
 
@@ -109,7 +109,7 @@ do
     vg index -s -k10 "graphs/${BASENAME}.vg"
     
     # Do the sim reads
-    SIM_FILE="reads/${REGION^^}.txt"
+    SIM_FILE="reads/trivial-${REGION^^}.txt"
     
     echo "`date`: Aligning simulated reads..."
     MODE="sim"
