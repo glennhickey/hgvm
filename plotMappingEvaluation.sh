@@ -25,7 +25,7 @@ do
         # Make sure we get an empty list of files if none exist.
         shopt -s nullglob
         
-        for FILE in stats/${REGION}/${MODE}/*.perfect.tsv
+        for FILE in stats/${MODE}/${REGION}/*.perfect.tsv
         do
             # Put the category name with no newline
             # Make sure to strip out the region name (no matter which side its dash is on)

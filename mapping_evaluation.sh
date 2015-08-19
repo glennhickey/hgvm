@@ -25,7 +25,7 @@ function run_stats {
     local BASENAME="${1}"
     local MODE="${2}"
 
-    local STATS_DIR="stats/${REGION}/${MODE}"
+    local STATS_DIR="stats/${MODE}/${REGION}"
     local ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
 
     mkdir -p "${STATS_DIR}"
