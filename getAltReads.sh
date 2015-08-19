@@ -143,7 +143,7 @@ do
         echo "Downloading ${TRIVIAL_GRAPH}..."
         
         # TODO: keep in sync with graph download in mapping_evaluation
-        sg2vg "${TRIVIAL_URL}" | vg view -Jv - | vg mod -X 100 - | vg ids -s - > "${TRIVIAL_GRAPH}"
+        sg2vg "${TRIVIAL_URL}" -u | vg view -Jv - | vg mod -X 100 - | vg ids -s - > "${TRIVIAL_GRAPH}"
     else
         echo "${TRIVIAL_GRAPH} already created..."
     fi

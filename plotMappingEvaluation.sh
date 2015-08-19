@@ -51,12 +51,14 @@ do
             # Now make the actual plot
             # Here we specify the order and colors for the different schemes
             # Only ones with data are used
-            ./barchart.py "${COLLATED_FILE}" --title "Perfectly mapped ${MODE} reads in ${REGION^^}" \
+            ./barchart.py "${COLLATED_FILE}" --title "$(printf "Perfectly mapped ${MODE}\nreads in ${REGION^^}")" \
                 --x_label "Graph" --y_label "Read Count" --save "${PLOTS_DIR}/${MODE}/${REGION}.png" \
-                --x_sideways --min 0 --max "${MAX}" \
-                --categories "cactus" "camel" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
+                --min 0 --max "${MAX}" \
+                --categories "cactus" "camel" "curoverse" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
                 "level1" "level2" "level3" \
-                --colors "g" "y" "r" "m" "c" "b" "c" "m" "y"
+                --category_labels "Cactus" "Camel" "Curoverse" "k=31" "k=63" "RefOnly" "Trivial" "Level1" "Level2" "Level3" \
+                --colors "g" "y" "#31184A" "r" "m" "c" "b" "c" "m" "y" \
+                --font_size 20 --dpi 90
         fi
     done
 done

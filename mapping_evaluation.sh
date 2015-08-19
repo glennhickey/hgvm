@@ -99,9 +99,9 @@ do
     # Work out the real URL
     URL="${BASE_URL}${VERSION}/"
     
-    # Get the graph, chop it to remove overly long sequences, and topologically sort and number it.
+    # Get the graph (in upper case), chop it to remove overly long sequences, and topologically sort and number it.
     echo "`date`: Getting graph..."
-    sg2vg "${URL}" | vg view -Jv - | vg mod -X 100 - | vg ids -s - > "graphs/${BASENAME}.vg"
+    sg2vg "${URL}" -u | vg view -Jv - | vg mod -X 100 - | vg ids -s - > "graphs/${BASENAME}.vg"
     
     # Index it
     echo "`date`: Indexing..."
@@ -115,7 +115,7 @@ do
     MODE="sim"
     ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
     
-    time vg map -r "${SIM_FILE}" "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+    time vg map -r "${SIM_FILE}" -n 3 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
     
     run_stats "${BASENAME}" "${MODE}"
     
@@ -131,7 +131,7 @@ do
     ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
     
     echo "`date`: Aligning real reads..."
-    time vg map -f "${WORK_DIR}/reads.1.fq" -f "${WORK_DIR}/reads.2.fq" "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+    time vg map -f "${WORK_DIR}/reads.1.fq" -f "${WORK_DIR}/reads.2.fq" -n 3 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
     
     run_stats "${BASENAME}" "${MODE}"
     
