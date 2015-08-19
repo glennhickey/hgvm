@@ -19,11 +19,11 @@ brca2	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/camel-brca2/	no	
 sma	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/camel-sma/	no	camel	no
 lrc_kir	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/camel-lrc_kir/	no	camel	no
 mhc	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/camel-mhc/	no	camel	no
-#brca1	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/curoverse/	no	curoverse	no
-#brca1	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/curoverse2/	no	curoverse	no
+brca1	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/curoverse/	no	curoverse	no
+brca1	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/curoverse2/	no	curoverse	no
 cenx	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/cenx-level1/	no	karen	no
-#cenx	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/cenx-level2/	no	karen	no
-#cenx	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/cenx-level3/	no	karen	no
+cenx	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/cenx-level2/	no	karen	no
+cenx	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/cenx-level3/	no	karen	no
 brca1	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/debruijn-brca1-k31/	no	oxford	no
 brca1	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/debruijn-brca1-k63/	no	oxford	no
 brca2	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/debruijn-brca2-k31/	no	oxford	no
@@ -34,3 +34,4 @@ mhc	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/debruijn-mhc-k31/	
 mhc	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/debruijn-mhc-k63/	no	oxford	no
 lrc_kir	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/debruijn-lrc_kir-k31/	no	oxford	no
 lrc_kir	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/debruijn-lrc_kir-k63/	no	oxford	no
+mhc	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/oxford-mhc/	no	prg	no
