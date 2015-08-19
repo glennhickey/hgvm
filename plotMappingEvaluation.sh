@@ -54,10 +54,12 @@ do
             ./barchart.py "${COLLATED_FILE}" --title "$(printf "Perfectly mapped ${MODE}\nreads in ${REGION^^}")" \
                 --x_label "Graph" --y_label "Read Count" --save "${PLOTS_DIR}/${MODE}/${REGION}.png" \
                 --min 0 --max "${MAX}" \
-                --categories "cactus" "camel" "curoverse" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
+                --categories "cactus" "camel" "curoverse" "curoverse2" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
                 "level1" "level2" "level3" \
-                --category_labels "Cactus" "Camel" "Curoverse" "k=31" "k=63" "RefOnly" "Trivial" "Level1" "Level2" "Level3" \
-                --colors "g" "y" "#31184A" "r" "m" "c" "b" "c" "m" "y" \
+                --category_labels "Cactus" "Camel" "Curoverse" "Curoverse2" "k=31" "k=63" "RefOnly" "Trivial" \
+                "Level1" "Level2" "Level3" \
+                --colors "g" "y" "#31184A" "#ADA3B7" "r" "m" "c" "b" "c" "m" "y" \
+                --x_sideways \
                 --font_size 20 --dpi 90
         fi
     done
