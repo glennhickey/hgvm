@@ -30,14 +30,14 @@ function run_stats {
 
     mkdir -p "${STATS_DIR}"
 
-    echo "`date`: Extracting scores..."
-    vg view -aj "${ALIGNMENT}" | jq '.score' | grep -v "null" > "${STATS_DIR}/${BASENAME}.scores.tsv"
+    echo "`date`: Extracting best scores..."
+    vg view -aj "${ALIGNMENT}" | jq 'select(.is_secondary | not) | .score' | grep -v "null" > "${STATS_DIR}/${BASENAME}.scores.tsv"
     
     echo "`date`: Extracting match fractions..."
     # Pull out the reads with non-null scores (i.e. that mapped), total up the
     # length of all the edits that are perfect matches, and spit out the
-    # fraction of each read that is a perfect match
-    vg view -aj "${ALIGNMENT}" | jq -r 'select(.score != null) | {
+    # fraction of each read that is a perfect match in a maximally good alignment for that read
+    vg view -aj "${ALIGNMENT}" | jq -r 'select(.score != null and (.is_secondary | not)) | {
         "length": .sequence | length, 
         "matches": ([.path.mapping[].edit[] | select(.to_length == .from_length and .sequence == null) | .to_length] | add)
     } | .matches / .length' > "${STATS_DIR}/${BASENAME}.matches.tsv"
@@ -47,9 +47,19 @@ function run_stats {
     # Keep the number around in a file too.
     echo "${PERFECT_MAPPINGS}" > "${STATS_DIR}/${BASENAME}.perfect.tsv"
     
+    echo "`date`: Extracting multimappings..."
+    # Since each read can only have 2 mappings, we can count the secondary mappings to get how many reads multimap.
+    vg view -aj "${ALIGNMENT}" | jq -r 'select(.score != null and .is_secondary) | {
+        "length": .sequence | length, 
+        "matches": ([.path.mapping[].edit[] | select(.to_length == .from_length and .sequence == null) | .to_length] | add)
+    } | .matches / .length' > "${STATS_DIR}/${BASENAME}.secondary.tsv"
+    MULTI_MAPPINGS=`cat "${STATS_DIR}/${BASENAME}.secondary.tsv" | wc -l`
+    echo "${MULTI_MAPPINGS}" > "${STATS_DIR}/${BASENAME}.multi.tsv"
+    
     echo "`date`: Plotting..."
     local PLOTS_DIR="plots/${MODE}/${REGION}"
     mkdir -p "${PLOTS_DIR}/scores"
+    mkdir -p "${PLOTS_DIR}/secondary"
     mkdir -p "${PLOTS_DIR}/matches"
     
     # Plot the scores
@@ -69,6 +79,15 @@ function run_stats {
         --x_min 0 \
         --bins 50 \
         --save "${PLOTS_DIR}/matches/${BASENAME}.png"
+        
+    # Plot the perfect match fractions for secondary alignments
+    ./histogram.py "${STATS_DIR}/${BASENAME}.secondary.tsv" \
+        --title "${MODE} Secondary Mapping Identity for ${BASENAME}" \
+        --x_label "Match Fraction" \
+        --y_label "Read Count" \
+        --x_min 0 \
+        --bins 50 \
+        --save "${PLOTS_DIR}/secondary/${BASENAME}.png"
 }
 
 while read -r REGION BASE_URL REST
@@ -115,7 +134,7 @@ do
     MODE="sim"
     ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
     
-    time vg map -r "${SIM_FILE}" -n 3 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+    time vg map -r "${SIM_FILE}" -n 3 -M 2 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
     
     run_stats "${BASENAME}" "${MODE}"
     
@@ -131,7 +150,7 @@ do
     ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
     
     echo "`date`: Aligning real reads..."
-    time vg map -f "${WORK_DIR}/reads.1.fq" -f "${WORK_DIR}/reads.2.fq" -n 3 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+    time vg map -f "${WORK_DIR}/reads.1.fq" -f "${WORK_DIR}/reads.2.fq" -n 3 -M 2 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
     
     run_stats "${BASENAME}" "${MODE}"
     
