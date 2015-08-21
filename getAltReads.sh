@@ -19,7 +19,7 @@ ALT_URL="ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA_000001405.17_GRCh38.p2/GCA_0
 # TODO: Is that correct?
 
 # Point at the correct sample to get reads from
-SAMPLE_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data/HG00096/high_cov_alignment/HG00096.alt_bwamem_GRCh38DH.20150424.high_coverage.bam.cram"
+SAMPLE_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/hgsv_sv_discovery/data/HG00513/high_cov_alignment/HG00513.alt_bwamem_GRCh38DH.20150715.CHS.high_coverage.cram"
 
 # Make the output directory
 mkdir -p "${OUT_DIR}"
@@ -73,8 +73,7 @@ function get_region {
             echo "chr${CHROMOSOME}:${CHR_START}-${CHR_STOP}"
             
             # Rewrite the actual alts names from GL000251.2 into chr6_GL000251v2_alt format and announce them.
-            # TODO: This sample doesn't actually have an index covering any alts.
-            #cat "${REGION_ALTS}" | cut -f4,5,6 | sed 's/\./v/' | awk "BEGIN {FS=\"\\t\"} {print \"chr${CHROMOSOME}_\" \$1 \"_alt:\" \$2 \"-\" \$3}"
+            cat "${REGION_ALTS}" | cut -f4,5,6 | sed 's/\./v/' | awk "BEGIN {FS=\"\\t\"} {print \"chr${CHROMOSOME}_\" \$1 \"_alt:\" \$2 \"-\" \$3}"
             
             # Clean up the temp file
             rm -f "${REGION_ALTS}"
@@ -102,26 +101,44 @@ do
             do
                 # Download the given range
                 echo "Downloading ${RANGE}..."
-                samtools view -b -o "${BAM_DIR}/${BAM_NUMBER}.bam" "${SAMPLE_URL}" "${RANGE}"
+                # Make sure to try twice because the network may or may not actually work
+                samtools view -b -o "${BAM_DIR}/${BAM_NUMBER}.bam" "${SAMPLE_URL}" "${RANGE}" || \
+                    samtools view -b -o "${BAM_DIR}/${BAM_NUMBER}.bam" "${SAMPLE_URL}" "${RANGE}"
             
                 # Move on to the next range
                 BAM_NUMBER=$((BAM_NUMBER + 1))
             done
         }
 
+        # Where do we put our temp bam before we sort it?
+        TEMP_BAM=`mktemp`
+
         if [[ `ls -1 "${BAM_DIR}" | wc -l` == "1" ]]
         then
-            echo "Moving ${BAM_NUMBER} bam into ${OUT_DIR}/${REGION}.bam..."
+            echo "Moving bam into ${TEMP_BAM}"
             mv "${BAM_DIR}/0.bam" "${OUT_DIR}/${REGION}.bam"
         else
             # We can only samtools cat with 2 or more files
-            echo "Concatenating ${BAM_NUMBER} bams into ${OUT_DIR}/${REGION}.bam..."
+            echo "Concatenating bams into ${OUT_DIR}/${REGION}.bam..."
             samtools cat -o "${OUT_DIR}/${REGION}.bam" "${BAM_DIR}"/*
         fi
+        
+        echo "Sorting by name into ${OUT_DIR}/${REGION}.bam..."
+        samtools sort -n "${TEMP_BAM}" "${OUT_DIR}/${REGION}.bam"
+        
         # Clean up the temporary bams
+        rm "${TEMP_BAM}"
         rm -rf "${BAM_DIR}"
     else
         echo "${OUT_DIR}/${REGION}.bam already created."
+    fi
+    
+    if [[ ! -e "${OUT_DIR}/${REGION}.1.fq" || ! -e "${OUT_DIR}/${REGION}.2.fq" ]]
+    then
+        echo "Splitting out reads into ${OUT_DIR}/${REGION}.1.fq and ${OUT_DIR}/${REGION}.2.fq..."
+        bedtools bamtofastq -i "${OUT_DIR}/${REGION}.bam" -fq "${OUT_DIR}/${REGION}.1.fq" -fq2 "${OUT_DIR}/${REGION}.2.fq" 2>/dev/null
+    else
+        echo "${OUT_DIR}/${REGION}.1.fq and ${OUT_DIR}/${REGION}.2.fq already created."
     fi
     
     if [[ "${REGION}" == "CENX" ]]
@@ -157,20 +174,6 @@ do
         echo "${OUT_DIR}/trivial-${REGION}.txt already created"
     fi
 done
-
-# What we were doing originally:
-
-#samtools view -b -o BRCA1.bam ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data/HG00096/high_cov_alignment/HG00096.alt_bwamem_GRCh38DH.20150424.high_coverage.bam.cram chr17:43044294-43125482
-
-#samtools view -b -o BRCA2.bam ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data/HG00096/high_cov_alignment/HG00096.alt_bwamem_GRCh38DH.20150424.high_coverage.bam.cram chr13:32314861-32399849
-
-#samtools view -b -o LRC_KIR.bam ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data/HG00096/high_cov_alignment/HG00096.alt_bwamem_GRCh38DH.20150424.high_coverage.bam.cram chr19:54025634-55084318
-
-#samtools view -b -o SMA.bam ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data/HG00096/high_cov_alignment/HG00096.alt_bwamem_GRCh38DH.20150424.high_coverage.bam.cram chr5:69216819-71614443
-
-#samtools view -b -o MHC.bam ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data/HG00096/high_cov_alignment/HG00096.alt_bwamem_GRCh38DH.20150424.high_coverage.bam.cram chr6:28510120-33480577
-
-#samtools view -b -o CENX.bam ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data/HG00096/high_cov_alignment/HG00096.alt_bwamem_GRCh38DH.20150424.high_coverage.bam.cram chrX:58605580-62412542
 
 # Clean up temporary files
 rm -f ${ALT_FILE}
