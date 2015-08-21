@@ -112,9 +112,6 @@ do
     BASENAME=$(echo "${BASE_URL}" | sed 's/.*\/\(.*\)\/$/\1/')
     echo "`date`: Testing ${BASENAME}"
 
-    # Make a temp dir
-    WORK_DIR=$(mktemp -d)
-
     # Work out the real URL
     URL="${BASE_URL}${VERSION}/"
     
@@ -139,25 +136,19 @@ do
     run_stats "${BASENAME}" "${MODE}"
     
     # If we have already downloaded reads for the regions, they will be here.
-    # Upper-case the region name and add .bam.
-    BAM_FILE="reads/${REGION^^}.bam"
-    
-    echo "`date`: Extracting reads to align..."
-    samtools sort -n "${BAM_FILE}" "${WORK_DIR}/reads-by-name"
-    bedtools bamtofastq -i "${WORK_DIR}/reads-by-name.bam" -fq "${WORK_DIR}/reads.1.fq" -fq2 "${WORK_DIR}/reads.2.fq" 2>/dev/null
+    # Upper-case the region name and add fastq extensions
+    FASTQ1="reads/${REGION^^}.1.fq"
+    FASTQ2="reads/${REGION^^}.2.fq"
     
     MODE="real"
     ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
     
     echo "`date`: Aligning real reads..."
-    time vg map -f "${WORK_DIR}/reads.1.fq" -f "${WORK_DIR}/reads.2.fq" -n 3 -M 2 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+    time vg map -f "${FASTQ1}" -f "${FASTQ1}" -n 3 -M 2 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
     
     run_stats "${BASENAME}" "${MODE}"
     
     echo "`date`: Surjecting..."
     vg surject -p ref -d "graphs/${BASENAME}.vg.index" -b "alignments/${BASENAME}.gam" > "alignments/${BASENAME}.bam"
-    
-    # No slashes here so we are protected against variable typos
-    rm -rf "${WORK_DIR}"
     
 done

@@ -55,10 +55,10 @@ do
                 --x_label "Graph" --y_label "Read Count" --save "${PLOTS_DIR}/${MODE}/${REGION}.png" \
                 --min 0 --max "${MAX}" \
                 --categories "cactus" "camel" "curoverse" "curoverse2" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
-                "level1" "level2" "level3" \
+                "level1" "level2" "level3" "snp1000g" \
                 --category_labels "Cactus" "Camel" "Curoverse" "Curoverse2" "k=31" "k=63" "RefOnly" "Trivial" \
-                "Level1" "Level2" "Level3" \
-                --colors "g" "y" "#31184A" "#ADA3B7" "r" "m" "c" "b" "c" "m" "y" \
+                "Level1" "Level2" "Level3" "1000G SNPs" \
+                --colors "g" "y" "#31184A" "#ADA3B7" "r" "m" "c" "b" "c" "m" "y" "k" \
                 --x_sideways \
                 --font_size 20 --dpi 90
         fi
