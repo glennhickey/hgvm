@@ -173,13 +173,10 @@ def pair_up(records):
                 # Complain there's something wrong
                 sys.stderr.write("Got improperly paired reads with name "
                     "{}\n".format(last_record[0]))
-                print last_record
-                print last_record[1] & BAM_FREAD1
-                print last_record[1] & BAM_FREAD2
-                print record
-                print record[1] & BAM_FREAD1
-                print record[1] & BAM_FREAD2
-                print last_record[2] == record[2]
+                
+                # Just skip this read for now, until a proper partner comes
+                # along for the other read, or some other name comes up.
+                continue
                     
         else:
             # The last record doesn't match this one's name. It clearly has no

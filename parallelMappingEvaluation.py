@@ -68,7 +68,7 @@ def run_all_alignments(target, server_list):
         # Break it into its fields
         parts = line.split("\t")
         
-        if(parts[0].startswith("#")):
+        if parts[0].startswith("#"):
             # Skip comments
             continue
     
@@ -77,6 +77,24 @@ def run_all_alignments(target, server_list):
             
         # Say what we did
         target.logToMaster("Running child for {}".format(parts[1]))
+        
+    # Before we run those, make sure their directories exist, by running a no-op
+    # with the bash script.
+    script = subprocess.Popen(["./mapping_evaluation.sh"],
+        stdin=subprocess.PIPE)
+    
+    # Send it a fake first line for it to skip, and then the actual data.
+    script.stdin.write("fake_header\n")
+    script.stdin.close()
+    script.wait()
+    
+    if script.returncode != 0:
+        # Fire off an error message
+        message = "Error: process on {} died with code {}".format(
+            self.line.strip(), script.returncode)
+            
+        self.logToMaster(message)
+        raise RuntimeError(message)
         
 class RunAlignmentTarget(jobTree.scriptTree.target.Target):
     """

@@ -111,20 +111,21 @@ do
         }
 
         # Where do we put our temp bam before we sort it?
-        TEMP_BAM=`mktemp`
+        TEMP_BAM="${OUT_DIR}/${REGION}.tmp.bam"
 
         if [[ `ls -1 "${BAM_DIR}" | wc -l` == "1" ]]
         then
             echo "Moving bam into ${TEMP_BAM}"
-            mv "${BAM_DIR}/0.bam" "${OUT_DIR}/${REGION}.bam"
+            mv "${BAM_DIR}/0.bam" "${TEMP_BAM}"
         else
             # We can only samtools cat with 2 or more files
-            echo "Concatenating bams into ${OUT_DIR}/${REGION}.bam..."
-            samtools cat -o "${OUT_DIR}/${REGION}.bam" "${BAM_DIR}"/*
+            echo "Concatenating bams into ${TEMP_BAM}..."
+            samtools cat -o "${TEMP_BAM}" "${BAM_DIR}"/*
         fi
         
         echo "Sorting by name into ${OUT_DIR}/${REGION}.bam..."
-        samtools sort -n "${TEMP_BAM}" "${OUT_DIR}/${REGION}.bam"
+        # Let samtools add the .bam for the output file
+        samtools sort -n "${TEMP_BAM}" "${OUT_DIR}/${REGION}"
         
         # Clean up the temporary bams
         rm "${TEMP_BAM}"
@@ -136,7 +137,10 @@ do
     if [[ ! -e "${OUT_DIR}/${REGION}.1.fq" || ! -e "${OUT_DIR}/${REGION}.2.fq" ]]
     then
         echo "Splitting out reads into ${OUT_DIR}/${REGION}.1.fq and ${OUT_DIR}/${REGION}.2.fq..."
-        bedtools bamtofastq -i "${OUT_DIR}/${REGION}.bam" -fq "${OUT_DIR}/${REGION}.1.fq" -fq2 "${OUT_DIR}/${REGION}.2.fq" 2>/dev/null
+        #bedtools bamtofastq -i "${OUT_DIR}/${REGION}.bam" -fq "${OUT_DIR}/${REGION}.1.fq" -fq2 "${OUT_DIR}/${REGION}.2.fq" 2>/dev/null
+        
+        # Run our new deduplicator/splitter, and throw away its errors because we know they will happen.
+        samtools view "${OUT_DIR}/${REGION}.bam" | ./smartSam2Fast2.py --fq1 "${OUT_DIR}/${REGION}.1.fq" --fq2 "${OUT_DIR}/${REGION}.2.fq" 2>/dev/null
     else
         echo "${OUT_DIR}/${REGION}.1.fq and ${OUT_DIR}/${REGION}.2.fq already created."
     fi

@@ -22,7 +22,7 @@ mhc	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/camel-mhc/	no	came
 brca1	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/curoverse/	no	curoverse	no
 brca1	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/curoverse2/	no	curoverse	no
 cenx	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/cenx-level1/	no	karen	no
-#cenx	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/cenx-level2/	no	karen	no
+cenx	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/cenx-level2/	no	karen	no
 #cenx	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/cenx-level3/	no	karen	no
 brca1	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/debruijn-brca1-k31/	no	oxford	no
 brca1	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/debruijn-brca1-k63/	no	oxford	no

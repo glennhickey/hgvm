@@ -144,7 +144,7 @@ do
     ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
     
     echo "`date`: Aligning real reads..."
-    time vg map -f "${FASTQ1}" -f "${FASTQ1}" -n 3 -M 2 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+    time vg map -f "${FASTQ1}" -f "${FASTQ2}" -n 3 -M 2 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
     
     run_stats "${BASENAME}" "${MODE}"
     
