@@ -140,7 +140,7 @@ do
         #bedtools bamtofastq -i "${OUT_DIR}/${REGION}.bam" -fq "${OUT_DIR}/${REGION}.1.fq" -fq2 "${OUT_DIR}/${REGION}.2.fq" 2>/dev/null
         
         # Run our new deduplicator/splitter, and throw away its errors because we know they will happen.
-        samtools view "${OUT_DIR}/${REGION}.bam" | ./smartSam2Fast2.py --fq1 "${OUT_DIR}/${REGION}.1.fq" --fq2 "${OUT_DIR}/${REGION}.2.fq" 2>/dev/null
+        samtools view "${OUT_DIR}/${REGION}.bam" | ./smartSam2Fastq.py --fq1 "${OUT_DIR}/${REGION}.1.fq" --fq2 "${OUT_DIR}/${REGION}.2.fq" 2>/dev/null
     else
         echo "${OUT_DIR}/${REGION}.1.fq and ${OUT_DIR}/${REGION}.2.fq already created."
     fi
