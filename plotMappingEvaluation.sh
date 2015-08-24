@@ -18,9 +18,9 @@ do
     do
         echo "Processing ${REGION} mode ${MODE}..."
     
-        COLLATED_FILE="${COLLATED_DIR}/${MODE}/${REGION}.tsv"
-        rm -f "${COLLATED_FILE}"
-        rm -f "${PLOTS_DIR}/${MODE}/${REGION}.png"
+        COLLATED_PRIMARY_FILE="${COLLATED_DIR}/${MODE}/${REGION}-primary-perfect.tsv"
+        rm -f "${COLLATED_PRIMARY_FILE}"
+        rm -f "${PLOTS_DIR}/${MODE}/primary-${REGION}.png"
         
         # Make sure we get an empty list of files if none exist.
         shopt -s nullglob
@@ -30,10 +30,32 @@ do
             # Put the category name with no newline
             # Make sure to strip out the region name (no matter which side its dash is on)
             printf "${FILE}\t" | sed 's/.*\/\(.*\)\.perfect\.tsv/\1/' | \
-                sed "s/-${REGION}//g" | sed "s/${REGION}-//g" >> "${COLLATED_FILE}"
+                sed "s/-${REGION}//g" | sed "s/${REGION}-//g" >> "${COLLATED_PRIMARY_FILE}"
         
             # Put the number of perfect reads in each category
-            cat "${FILE}" >> "${COLLATED_FILE}"
+            cat "${FILE}" >> "${COLLATED_PRIMARY_FILE}"
+        done
+        
+        # Now what portion of secondary reads aren't good?
+        COLLATED_SECONDARY_FILE="${COLLATED_DIR}/${MODE}/${REGION}-secondary-bad.tsv"
+        rm -f "${COLLATED_SECONDARY_FILE}"
+        rm -f "${PLOTS_DIR}/${MODE}/secondary-${REGION}.png"
+        
+        for FILE in stats/${MODE}/${REGION}/*.secondary.tsv
+        do
+            # Work out how many secondary alignments are bad enough
+            UNDER_COUNT=`cat "${FILE}" | awk '{if ($1 < 0.98) print $0}' | wc -l`
+            TOTAL_COUNT=`cat "${FILE}" |  wc -l`
+            
+            # Put the category name with no newline in the file to plot
+            # Make sure to strip out the region name (no matter which side its dash is on)
+            printf "${FILE}\t" | sed 's/.*\/\(.*\)\.secondary\.tsv/\1/' | \
+                sed "s/-${REGION}//g" | sed "s/${REGION}-//g" >> "${COLLATED_SECONDARY_FILE}"
+            
+            # Put the fraction of secondary alignments that are sufficiently bad.
+            echo "${UNDER_COUNT} / ${TOTAL_COUNT}" | bc -l >> "${COLLATED_SECONDARY_FILE}"
+            
+            # TODO: nonexistent isn't sufficiently bad
         done
         
         if [[ "${MODE}" == "sim" ]]
@@ -45,15 +67,33 @@ do
             MAX=`samtools flagstat reads/${REGION^^}.bam | head -n1 | sed 's/\([0-9]*\).*/\1/'`
         fi
         
-        if [[ -e "${COLLATED_FILE}" ]]
+        if [[ -e "${COLLATED_PRIMARY_FILE}" ]]
         then
         
             # Now make the actual plot
             # Here we specify the order and colors for the different schemes
             # Only ones with data are used
-            ./barchart.py "${COLLATED_FILE}" --title "$(printf "Perfectly mapped ${MODE}\nreads in ${REGION^^}")" \
-                --x_label "Graph" --y_label "Read Count" --save "${PLOTS_DIR}/${MODE}/${REGION}.png" \
+            ./barchart.py "${COLLATED_PRIMARY_FILE}" --title "$(printf "Perfectly mapped ${MODE}\nreads in ${REGION^^}")" \
+                --x_label "Graph" --y_label "Read Count" --save "${PLOTS_DIR}/${MODE}/primary-${REGION}.png" \
                 --min 0 --max "${MAX}" \
+                --categories "cactus" "camel" "curoverse" "curoverse2" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
+                "level1" "level2" "level3" "snp1000g" \
+                --category_labels "Cactus" "Camel" "Curoverse" "Curoverse2" "k=31" "k=63" "RefOnly" "Trivial" \
+                "Level1" "Level2" "Level3" "1000G SNPs" \
+                --colors "g" "y" "#31184A" "#ADA3B7" "r" "m" "c" "b" "c" "m" "y" "k" \
+                --x_sideways \
+                --font_size 20 --dpi 90
+        fi
+        
+        if [[ -e "${COLLATED_SECONDARY_FILE}" ]]
+        then
+        
+            # Now make the actual plot
+            # Here we specify the order and colors for the different schemes
+            # Only ones with data are used
+            ./barchart.py "${COLLATED_SECONDARY_FILE}" --title "$(printf "${MODE} reads in ${REGION^^}\nwith poor secondary alignments")" \
+                --x_label "Graph" --y_label "Fraction Dismissable" --save "${PLOTS_DIR}/${MODE}/secondary-${REGION}.png" \
+                --min 0 --max 1 \
                 --categories "cactus" "camel" "curoverse" "curoverse2" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
                 "level1" "level2" "level3" "snp1000g" \
                 --category_labels "Cactus" "Camel" "Curoverse" "Curoverse2" "k=31" "k=63" "RefOnly" "Trivial" \
