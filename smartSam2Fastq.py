@@ -62,8 +62,8 @@ def parse_args(args):
 def parse_and_deduplicate_sam(sam_input):
     """
     Given a source of input SAM lines, yield all the lines for unique reads.
-    Parses lines into (name, flags, sequence, quality) tuples, and un-reverses
-    reads (and clears the reversed flag).
+    Parses lines into (name, flags, sequence, quality, mapping info) tuples,
+    and un-reverses reads (and clears the reversed flag).
     
     TODO: fix this test to not be ugly.
     >>> lines_in = ["ERR894727.320\\t2147\\tchr6_GL000254v2_alt\\t198561\\t60"
@@ -111,6 +111,8 @@ def parse_and_deduplicate_sam(sam_input):
         
         # Get the flags
         flags = int(parts[1])
+        # Get the mapping info
+        mapping_info = (parts[2], int(parts[3]), int(parts[4]))
         # Get the read sequence
         sequence = parts[9]
         # And the quality
@@ -129,13 +131,13 @@ def parse_and_deduplicate_sam(sam_input):
             # We don't have a copy of this yet
             found_reads.add(identity)
             
-            yield (name, flags, sequence, quality)
+            yield (name, flags, sequence, quality, mapping_info)
             
 def pair_up(records):
     """
-    Pairs up deduplicated (name, flags, sequence, quality) records. Only yields
-    matched pairs that come one after the other. Adds /1 to name for READ1
-    reads, and /2 for READ2 reads.
+    Pairs up deduplicated (name, flags, sequence, quality, mapping contig)
+    records. Only yields matched pairs that come one after the other. Adds /1 to
+    name for READ1 reads, and /2 for READ2 reads.
     
     Yields pairs of record lists
     
@@ -173,6 +175,12 @@ def pair_up(records):
                 # Complain there's something wrong
                 sys.stderr.write("Got improperly paired reads with name "
                     "{}\n".format(last_record[0]))
+                sys.stderr.write("Is READ1: {} {}\n".format(
+                    record[1] & BAM_FREAD1, last_record[1] & BAM_FREAD1))
+                sys.stderr.write("Is READ2: {} {}\n".format(
+                    record[1] & BAM_FREAD2, last_record[1] & BAM_FREAD2))
+                sys.stderr.write("Read A:{}\n".format(record))
+                sys.stderr.write("Read B:{}\n".format(last_record))
                 
                 # Just skip this read for now, until a proper partner comes
                 # along for the other read, or some other name comes up.
@@ -189,7 +197,7 @@ def write_fastq(stream, record):
     """
     
     # Unpack and format the record
-    (name, _, sequence, quality) = record
+    (name, _, sequence, quality, _) = record
     stream.write("@{}\n{}\n+\n{}\n".format(name, sequence, quality))
     
 def main(args):

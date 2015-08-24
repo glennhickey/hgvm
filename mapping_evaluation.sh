@@ -124,16 +124,22 @@ do
     rm -rf "graphs/${BASENAME}.vg.index/"
     vg index -s -k10 "graphs/${BASENAME}.vg"
     
-    # Do the sim reads
-    SIM_FILE="reads/trivial-${REGION^^}.txt"
+    if [[ "${REGION}" != "cenx" ]]
+    then
+        # cenx doesn't ahve any simulated reads to run.
     
-    echo "`date`: Aligning simulated reads..."
-    MODE="sim"
-    ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
-    
-    time vg map -r "${SIM_FILE}" -n 3 -M 2 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
-    
-    run_stats "${BASENAME}" "${MODE}"
+        # Do the sim reads
+        SIM_FILE="reads/trivial-${REGION^^}.txt"
+        
+        echo "`date`: Aligning simulated reads..."
+        MODE="sim"
+        ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
+        
+        time vg map -r "${SIM_FILE}" -n 3 -M 2 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+        
+        run_stats "${BASENAME}" "${MODE}"
+        
+    fi
     
     # If we have already downloaded reads for the regions, they will be here.
     # Upper-case the region name and add fastq extensions
