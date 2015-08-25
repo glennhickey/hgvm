@@ -43,16 +43,26 @@ do
         
         for FILE in stats/${MODE}/${REGION}/*.secondary.tsv
         do
+            # What graph is this?
+            BASENAME=`echo "${FILE}" | sed 's/.*\/\(.*\)\.secondary\.tsv/\1/'`
+            
             # Work out how many secondary alignments are bad enough
             UNDER_COUNT=`cat "${FILE}" | awk '{if ($1 < 0.98) print $0}' | wc -l`
-            TOTAL_COUNT=`cat "${FILE}" |  wc -l`
+            # And how many secondary ones
+            MULTI_COUNT=`cat "${FILE}" |  wc -l`
+            # And how many primary ones exist
+            TOTAL_COUNT=`cat stats/${MODE}/${REGION}/${BASENAME}.scores.tsv | wc -l`
+            
+            # Add the count of primary ones with no secondary mappings to the
+            # count of sufficiently bad secondary mappings.
+            UNDER_COUNT=$((UNDER_COUNT + TOTAL_COUNT - MULTI_COUNT))
             
             # Put the category name with no newline in the file to plot
             # Make sure to strip out the region name (no matter which side its dash is on)
             printf "${FILE}\t" | sed 's/.*\/\(.*\)\.secondary\.tsv/\1/' | \
                 sed "s/-${REGION}//g" | sed "s/${REGION}-//g" >> "${COLLATED_SECONDARY_FILE}"
             
-            # Put the fraction of secondary alignments that are sufficiently bad.
+            # Put the fraction of reads where the secondary alignments are sufficiently bad.
             echo "${UNDER_COUNT} / ${TOTAL_COUNT}" | bc -l >> "${COLLATED_SECONDARY_FILE}"
             
             # TODO: nonexistent isn't sufficiently bad
@@ -76,11 +86,11 @@ do
             ./barchart.py "${COLLATED_PRIMARY_FILE}" --title "$(printf "Perfectly mapped ${MODE}\nreads in ${REGION^^}")" \
                 --x_label "Graph" --y_label "Read Count" --save "${PLOTS_DIR}/${MODE}/primary-${REGION}.png" \
                 --min 0 --max "${MAX}" \
-                --categories "cactus" "camel" "curoverse" "curoverse2" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
+                --categories "cactus" "camel" "vg" "curoverse" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
                 "level1" "level2" "level3" "snp1000g" \
-                --category_labels "Cactus" "Camel" "Curoverse" "Curoverse2" "k=31" "k=63" "RefOnly" "Trivial" \
+                --category_labels "Cactus" "Camel" "VG" "Curoverse" "k=31" "k=63" "RefOnly" "Trivial" \
                 "Level1" "Level2" "Level3" "1000G SNPs" \
-                --colors "g" "y" "#31184A" "#ADA3B7" "r" "m" "c" "b" "c" "m" "y" "k" \
+                --colors "g" "y" "#000099" "#31184A" "r" "m" "c" "b" "c" "m" "y" "k" \
                 --x_sideways \
                 --font_size 20 --dpi 90
         fi
@@ -94,11 +104,11 @@ do
             ./barchart.py "${COLLATED_SECONDARY_FILE}" --title "$(printf "${MODE} reads in ${REGION^^}\nwith poor secondary alignments")" \
                 --x_label "Graph" --y_label "Fraction Dismissable" --save "${PLOTS_DIR}/${MODE}/secondary-${REGION}.png" \
                 --min 0 --max 1 \
-                --categories "cactus" "camel" "curoverse" "curoverse2" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
+                --categories "cactus" "camel" "vg" "curoverse" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
                 "level1" "level2" "level3" "snp1000g" \
-                --category_labels "Cactus" "Camel" "Curoverse" "Curoverse2" "k=31" "k=63" "RefOnly" "Trivial" \
+                --category_labels "Cactus" "Camel" "VG" "Curoverse" "k=31" "k=63" "RefOnly" "Trivial" \
                 "Level1" "Level2" "Level3" "1000G SNPs" \
-                --colors "g" "y" "#31184A" "#ADA3B7" "r" "m" "c" "b" "c" "m" "y" "k" \
+                --colors "g" "y" "#000099" "#31184A" "r" "m" "c" "b" "c" "m" "y" "k" \
                 --x_sideways \
                 --font_size 20 --dpi 90
         fi

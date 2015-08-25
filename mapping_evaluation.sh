@@ -115,9 +115,12 @@ do
     # Work out the real URL
     URL="${BASE_URL}${VERSION}/"
     
-    # Get the graph (in upper case), chop it to remove overly long sequences, and topologically sort and number it.
-    echo "`date`: Getting graph..."
-    sg2vg "${URL}" -u | vg view -Jv - | vg mod -X 100 - | vg ids -s - > "graphs/${BASENAME}.vg"
+    if [[ ! -e "graphs/${BASENAME}.vg" ]]
+    then
+        # Get the graph (in upper case), chop it to remove overly long sequences, and topologically sort and number it.
+        echo "`date`: Getting graph..."
+        sg2vg "${URL}" -u | vg view -Jv - | vg mod -X 100 - | vg ids -s - > "graphs/${BASENAME}.vg"
+    fi
     
     # Index it
     echo "`date`: Indexing..."
