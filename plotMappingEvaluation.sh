@@ -86,11 +86,12 @@ do
             ./barchart.py "${COLLATED_PRIMARY_FILE}" --title "$(printf "Perfectly mapped ${MODE}\nreads in ${REGION^^}")" \
                 --x_label "Graph" --y_label "Read Count" --save "${PLOTS_DIR}/${MODE}/primary-${REGION}.png" \
                 --min 0 --max "${MAX}" \
-                --categories "cactus" "camel" "vg" "curoverse" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
-                "level1" "level2" "level3" "snp1000g" \
-                --category_labels "Cactus" "Camel" "VG" "Curoverse" "k=31" "k=63" "RefOnly" "Trivial" \
-                "Level1" "Level2" "Level3" "1000G SNPs" \
-                --colors "g" "y" "#000099" "#31184A" "r" "m" "c" "b" "c" "m" "y" "k" \
+                --categories "cactus" "camel" "vg" "curoverse" "simons" "snp1000g" "debruijn-k31" "debruijn-k63"\
+                "refonly" "trivial" \
+                "level1" "level2" "level3" \
+                --category_labels "Cactus" "Camel" "VG" "Simons" "1000G SNPs" "Curoverse" "k=31" "k=63" "RefOnly" "Trivial" \
+                "Level1" "Level2" "Level3" \
+                --colors "g" "y" "#000099" "#31184A" "#384DA0" "k" "r" "m" "c" "b" "c" "m" "y" \
                 --x_sideways \
                 --font_size 20 --dpi 90
         fi
@@ -104,11 +105,12 @@ do
             ./barchart.py "${COLLATED_SECONDARY_FILE}" --title "$(printf "${MODE} reads in ${REGION^^}\nwith poor secondary alignments")" \
                 --x_label "Graph" --y_label "Fraction Dismissable" --save "${PLOTS_DIR}/${MODE}/secondary-${REGION}.png" \
                 --min 0 --max 1 \
-                --categories "cactus" "camel" "vg" "curoverse" "debruijn-k31" "debruijn-k63" "refonly" "trivial" \
-                "level1" "level2" "level3" "snp1000g" \
-                --category_labels "Cactus" "Camel" "VG" "Curoverse" "k=31" "k=63" "RefOnly" "Trivial" \
-                "Level1" "Level2" "Level3" "1000G SNPs" \
-                --colors "g" "y" "#000099" "#31184A" "r" "m" "c" "b" "c" "m" "y" "k" \
+                --categories "cactus" "camel" "vg" "curoverse" "simons" "snp1000g" "debruijn-k31" "debruijn-k63"\
+                "refonly" "trivial" \
+                "level1" "level2" "level3" \
+                --category_labels "Cactus" "Camel" "VG" "Simons" "1000G SNPs" "Curoverse" "k=31" "k=63" "RefOnly" "Trivial" \
+                "Level1" "Level2" "Level3" \
+                --colors "g" "y" "#000099" "#31184A" "#384DA0" "k" "r" "m" "c" "b" "c" "m" "y" \
                 --x_sideways \
                 --font_size 20 --dpi 90
         fi
