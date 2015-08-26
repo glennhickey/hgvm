@@ -71,6 +71,10 @@ def run_all_alignments(target, server_list):
         if parts[0].startswith("#"):
             # Skip comments
             continue
+            
+        if parts[0].startswith("\n"):
+            # Skip newlines
+            continue
     
         # We cleverly just split the lines out to different nodes
         target.addChildTarget(RunAlignmentTarget(line))
