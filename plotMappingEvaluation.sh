@@ -101,8 +101,8 @@ do
             # Now make the actual plot
             # Here we specify the order and colors for the different schemes
             # Only ones with data are used
-            ./barchart.py "${COLLATED_SECONDARY_FILE}" --title "$(printf "${MODE} reads in ${REGION^^}\nwith poor secondary alignments")" \
-                --x_label "Graph" --y_label "Fraction Dismissable" --save "${PLOTS_DIR}/${MODE}/secondary-${REGION}.png" \
+            ./barchart.py "${COLLATED_SECONDARY_FILE}" --title "$(printf "${MODE} reads in ${REGION^^}\nwithout good secondary alignments")" \
+                --x_label "Graph" --y_label "$(printf "Portion Not\nMultimapped")" --save "${PLOTS_DIR}/${MODE}/secondary-${REGION}.png" \
                 --min 0 --max 1 \
                 --categories "cactus" "camel" "vg" "curoverse" "simons" "snp1000g" "prg" "debruijn-k31" "debruijn-k63"\
                 "refonly" "trivial" "level1" "level2" "level3" \

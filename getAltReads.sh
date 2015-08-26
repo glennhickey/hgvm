@@ -30,7 +30,7 @@ PICARD_URL="https://github.com/broadinstitute/picard/releases/download/${PICARD_
 if [[ ! -d "${PICARD_DIR}" ]]
 then
     # Install Picard
-    wget "${PICARD_URL}"
+    wget "${PICARD_URL}" -O "${PICARD_DIR}.zip"
     unzip "${PICARD_DIR}.zip"
 fi
 
