@@ -1,7 +1,9 @@
 #!/usr/bin/env python2.7
 """
-smartSam2Fastq.py: turn sorted-by-names SAM input into a properly deduplicated 
-FASTQ
+smartSam2Fastq.py: turn sorted-by-names SAM input into a properly deduplicated
+FASTQ. Also work around the bug in bwa mem where some even-length alignments to
+reverse strands of alts will have incorrect bases for one of the middle two
+bases.
 
 accounts for both secondary and supplementary alignments of the same read
 
@@ -58,12 +60,135 @@ def parse_args(args):
         
     return parser.parse_args(args)
 
+class Read(object):
+    """
+    Represent a Read as reconstructed from an alignment.
     
+    """
+    def __init__(self, sam_line):
+        """
+        Parse the given SAM line and construct a read.
+        
+        """
+        
+        # Save the line
+        self.line = sam_line
+        
+        # Parse out the fields
+        parts = sam_line.split("\t")
+        # Get the template name
+        self.template = parts[0]
+        
+        # Grab the flags
+        self.flags = int(parts[1])
+        
+        # What end are we (1, 2, or 0 for unpaired)
+        if self.flags & BAM_FREAD1:
+            if self.flags & BAM_FREAD2:
+                # This shouldn't happen
+                raise RuntimeError("Alignment flagged as both READ1 and READ2")
+            
+            # Otherwise we're READ1
+            self.end = 1
+        elif self.flags & BAM_FREAD2:
+            # We're READ2
+            self.end = 2
+        else:
+            # We're unpaired
+            self.end = 0
+            
+        # Grab sequence and qualities
+        self.sequence = parts[9]
+        self.qualities = parts[10]
+        
+        
+        
+        if self.flags & BAM_FREVERSE:
+            # Flip to the other strand by RCing sequence and reversing qualities
+            self.sequence = reverse_complement(self.sequence)
+            self.qualities = self.qualities[::-1]
+            self.is_reverse = True
+        else:
+            self.is_reverse = False
+            
+        # Grab the contig we mapped to
+        self.contig = parts[2]
+        
+        # Figure out if we are suspected to be corrupted by the bwa mem bug or
+        # not. It seems to affect all alignments to alts, not just reverse strand
+        # ones.
+        self.is_suspect = ((True or self.flags & BAM_FREVERSE) and 
+            self.contig.endswith("_alt") and
+            len(self.sequence) % 2 == 0)
+            
+    def get_name(self):
+        """
+        Produce a name for the read based on the template and the end.
+        
+        """
+        
+        if self.end == 0:
+            # Unpaired reads are named for the template
+            return self.template
+        else:
+            # Paired reads get /1 and /2
+            return "{}/{}".format(self.template, self.end)
+            
+    def __eq__(self, other):
+        """
+        Two Reads are equal when they are the same read, but other meta-info
+        about the original alignment may differ.
+        
+        """
+        
+        if not isinstance(other, self.__class__):
+            return False
+        
+        
+        if self.template != other.template:
+            return False
+        if self.sequence != other.sequence:
+            return False
+        if self.qualities != other.qualities:
+            return Fasle
+        if self.end != other.end:
+            return False
+            
+        return True
+        
+    def __ne__(self, other):
+        return not (self.__eq__(other))
+        
+    def __gt__(self, other):
+        """
+        A Read is greater than another read if it should replace the other read
+        (they are the same end of the same template, and the other read is
+        suspect while this one is not, or this one has a longer sequence and
+        isn't suspect).
+        
+        """
+        
+        return (self.template == other.template and self.end == other.end and
+            (not self.is_suspect) and 
+            (len(self.sequence) > len(other.sequence) or other.is_suspect))
+            
+    def __str__(self):
+        """
+        Turn this Read into a string for displaying.
+        
+        """
+        
+        mark = "?" if self.is_suspect else ""
+        return "{} end {} on {}: {}{}".format(self.template, self.end,
+            self.contig, self.sequence, mark)
+        
 def parse_and_deduplicate_sam(sam_input):
     """
-    Given a source of input SAM lines, yield all the lines for unique reads.
-    Parses lines into (name, flags, sequence, quality, mapping info) tuples,
-    and un-reverses reads (and clears the reversed flag).
+    Given a source of input SAM lines, parses lines into Read objects, and
+    deduplicates them, discarding suspect ones when non-suspect ones are
+    available.
+    
+    Yields dicts form end number to Read object for each template.
     
     TODO: fix this test to not be ugly.
     >>> lines_in = ["ERR894727.320\\t2147\\tchr6_GL000254v2_alt\\t198561\\t60"
@@ -86,12 +211,11 @@ def parse_and_deduplicate_sam(sam_input):
     
     """
     
-    # What was the name of the last read
-    last_name = None
+    # What was the template for the last read
+    last_template = None
     
-    # This holds a set of (forward sequence, is_read1, is_read2) tuples for a
-    # given read name.
-    found_reads = set()
+    # For this template, we keep the best read for each end we find.
+    reads_by_end = {}
     
     for line in sam_input:
         if line.startswith("@"):
@@ -99,106 +223,66 @@ def parse_and_deduplicate_sam(sam_input):
             yield line
             continue
     
-        # Parse out the fields
-        parts = line.split("\t")
-        # Get the template name
-        name = parts[0]
+        # Parse the read
+        read = Read(line)
         
-        if name != last_name:
+        if read.template != last_template:
+            
+            all_ok = True
+            for end_read in reads_by_end.itervalues():
+                # Yield out the last state's reads.
+                
+                if(end_read.is_suspect):
+                    sys.stderr.write("Only suspect alignments found for end "
+                        "{} of template {}. Skipping.\n".format(end_read.end,
+                        end_read.template))
+                all_ok = False
+              
+            if all_ok:  
+                yield reads_by_end
+        
             # Start a new state
-            last_name = name
-            found_reads = set()
+            last_template = read.template
+            reads_by_end = {}
+            
         
-        # Get the flags
-        flags = int(parts[1])
-        # Get the mapping info
-        mapping_info = (parts[2], int(parts[3]), int(parts[4]))
-        # Get the read sequence
-        sequence = parts[9]
-        # And the quality
-        quality = parts[10]
-        
-        if flags & BAM_FREVERSE:
-            # The sequence is given here as the reverse complement, so flip it
-            # and the quality.
-            sequence = reverse_complement(sequence)
-            quality = quality[::-1]
-            flags &= ~BAM_FREVERSE
-            
-        # Define the identity tuple
-        identity = (sequence, flags & BAM_FREAD1, flags & BAM_FREAD2)
-        if identity not in found_reads:
-            # We don't have a copy of this yet
-            found_reads.add(identity)
-            
-            yield (name, flags, sequence, quality, mapping_info)
-            
-def pair_up(records):
-    """
-    Pairs up deduplicated (name, flags, sequence, quality, mapping contig)
-    records. Only yields matched pairs that come one after the other. Adds /1 to
-    name for READ1 reads, and /2 for READ2 reads.
-    
-    Yields pairs of record lists
-    
-    """
-
-    last_record = None
-    
-    for record in records:
-    
-        if last_record is not None and last_record[0] == record[0]:
-            # We may have a matched pair
-            
-            if(record[1] & BAM_FREAD1 != last_record[1] & BAM_FREAD1 or
-                record[1] & BAM_FREAD2 != last_record[1] & BAM_FREAD2):
-                
-                # One is a READ1 and one is a READ2
-                
-                # Make a mutable pair
-                pair = [list(last_record), list(record)]
-                
-                for r in pair:
-                    # Add the end tags to each name
-                    if r[1] & BAM_FREAD1:
-                        r[0] += "/1"
-                    if r[1] & BAM_FREAD2:
-                        r[0] += "/2"
-                    
-                # Yield them paired
-                yield pair
-                
-                # Neither of these can be paired again
-                last_record = None
-                
-            else:
-                # Complain there's something wrong
-                sys.stderr.write("Got improperly paired reads with name "
-                    "{}\n".format(last_record[0]))
-                sys.stderr.write("Is READ1: {} {}\n".format(
-                    record[1] & BAM_FREAD1, last_record[1] & BAM_FREAD1))
-                sys.stderr.write("Is READ2: {} {}\n".format(
-                    record[1] & BAM_FREAD2, last_record[1] & BAM_FREAD2))
-                sys.stderr.write("Read A:{}\n".format(record))
-                sys.stderr.write("Read B:{}\n".format(last_record))
-                
-                # Just skip this read for now, until a proper partner comes
-                # along for the other read, or some other name comes up.
-                continue
-                    
+        if not reads_by_end.has_key(read.end):
+            # This is the only read for this end so far
+            reads_by_end[read.end] = read
         else:
-            # The last record doesn't match this one's name. It clearly has no
-            # pair, so drop it. Remember this record instead.
-            last_record = record
+            if reads_by_end[read.end] < read:
+                # Replace the existing read
+                reads_by_end[read.end] = read
+            elif (not read.is_suspect and 
+                len(read.sequence) >= len(reads_by_end[read.end].sequence) and 
+                read != reads_by_end[read.end]):
+                # We aren't suspect, we differ, and we can't replace the other
+                # read.
+                raise RuntimeError("Non-suspect alignments don't agree on end "
+                    "{} of template {}:\n{}\n{}".format(read.end, read.template,
+                    read.line, reads_by_end[read.end].line))
+    
+    all_ok = True
+    for end_read in reads_by_end.itervalues():
+        # Yield out the last state's reads.
+        
+        if(end_read.is_suspect):
+            sys.stderr.write("Only suspect alignments found for end "
+                "{} of template {}. Skipping.\n".format(end_read.end,
+                end_read.template))
+        all_ok = False
+      
+    if all_ok:  
+        yield reads_by_end
             
-def write_fastq(stream, record):
+def write_fastq(stream, read):
     """
     Write the given record as FASTQ to the given stream
     """
     
     # Unpack and format the record
-    (name, _, sequence, quality, _) = record
-    stream.write("@{}\n{}\n+\n{}\n".format(name, sequence, quality))
+    stream.write("@{}\n{}\n+\n{}\n".format(read.get_name(), read.sequence,
+        read.qualities))
     
 def main(args):
     """
@@ -213,10 +297,14 @@ def main(args):
     
     options = parse_args(args) # This holds the nicely-parsed options object
     
-    for (record1, record2) in pair_up(parse_and_deduplicate_sam(options.input_sam)):
-        # Split up the records to their files
-        write_fastq(options.fq1, record1)
-        write_fastq(options.fq2, record2)
+    for reads_by_end in parse_and_deduplicate_sam(options.input_sam):
+        if not (reads_by_end.has_key(1) and reads_by_end.has_key(2)):
+            # Skip unpaired reads
+            continue
+            
+        # Split up the reads to their files
+        write_fastq(options.fq1, reads_by_end[1])
+        write_fastq(options.fq2, reads_by_end[2])
         
     
     
