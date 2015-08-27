@@ -9,8 +9,10 @@ accounts for both secondary and supplementary alignments of the same read
 
 """
 
-import argparse, sys, os, os.path, random, itertools, string
+import argparse, sys, os, os.path, random, itertools, string, re
 import doctest
+
+import pysam
 
 # We need to do reverse complements
 RC_TABLE=string.maketrans("ACGT", "TGCA")
@@ -44,9 +46,8 @@ def parse_args(args):
         formatter_class=argparse.RawDescriptionHelpFormatter)
     
     # General options
-    parser.add_argument("--input_sam", type=argparse.FileType("r"),
-        default=sys.stdin,
-        help="input SAM in name-sorted order")
+    parser.add_argument("input_sam", type=str,
+        help="input SAM in name-sorted order. Cannot be standard input.")
     parser.add_argument("--fq1", type=argparse.FileType("w"),
         default=sys.stdout,
         help="FASTQ file to save all the READ1 reads in")
@@ -114,12 +115,9 @@ class Read(object):
         # Grab the contig we mapped to
         self.contig = parts[2]
         
-        # Figure out if we are suspected to be corrupted by the bwa mem bug or
-        # not. It seems to affect all alignments to alts, not just reverse strand
-        # ones.
-        self.is_suspect = ((True or self.flags & BAM_FREVERSE) and 
-            self.contig.endswith("_alt") and
-            len(self.sequence) % 2 == 0)
+        # Say we aren't suspect. We'll be marked suspect later by the better SAM
+        # parser.
+        self.is_suspect = False
             
     def get_name(self):
         """
@@ -181,6 +179,132 @@ class Read(object):
         mark = "?" if self.is_suspect else ""
         return "{} end {} on {}: {}{}".format(self.template, self.end,
             self.contig, self.sequence, mark)
+            
+def parse_MD_tag(md_string, offset, length):
+    """
+    Given the string value of an MD tag, the offset into the read at which it
+    starts (due to e.g. hard clipping), and the total length of the read, return
+    a dict from mismatch positions to replaced bases.
+    
+    Delete is not present since those obviously are not in the read.
+    """
+    
+    # Fill this in with mismatches.
+    to_return = {}
+    
+    # Split the MD tag between indels/substitutions and digits
+    parts = re.split("([ACGTN^]+)", md_string)
+    
+    # Keep a cursor for what we need to update next
+    cursor = offset
+    
+    for part in parts:
+        if re.match("[0-9]+", part):
+            # This is a number of matches or inserts
+            part = int(part)
+            
+            # All these bases are matches or inserts
+            
+            # Move along to the base after that
+            cursor += part
+        else:
+            if part.startswith("^"):
+                # Nobody here cares. This was just a deletion.
+                pass
+            else:
+                for i in xrange(len(part)):
+                    # All the bases we have letters for here were replaced. Put
+                    # in the bases that were replaced.
+                    to_return[cursor + i] = part[i]
+                
+                cursor += len(part)
+            
+    
+    print md_string
+    print parts
+    print to_return
+    
+    return to_return
+    
+
+def pysam_parse_reads(sam_file):
+    """
+    Parse and deduplicate with pysam. Takes a filename or File object.
+    
+    Yields Reads with their is_suspect flag modified so we only suspect alt
+    alignments which have central mismatches.
+    
+    """
+    
+    sam = pysam.AlignmentFile(sam_file)
+    
+    for read in sam:
+    
+        print("Handling read on template {}".format(read.query_name))
+    
+        is_suspect = False
+        
+        # Calculate the length of the original input read, including bases that
+        # were hard clipped.
+        input_length = 0
+        
+        if read.cigartuples is None:
+            # Just use the read itself.
+            # TODO: why do we have no CIGAR?
+            input_length = len(read.query_sequence)
+        else:
+        
+            for (op, count) in read.cigartuples:
+                if op == 2 or op == 3 or op == 6:
+                    # Skip deletions, reference skips, and padding
+                    continue
+                else:
+                    input_length += count
+        
+        reference_name = sam.getrname(read.reference_id)
+        
+        if input_length is None:
+            print read
+        
+        if input_length % 2 == 0 and reference_name.endswith("_alt"):
+            # It could be corrupted.
+
+            # Work out the clipping offset from the CIGAR (4 = soft clip, 5 =
+            # hard clip)
+            first_cigar = read.cigartuples[0]
+            if (first_cigar[0] == 4 or
+                first_cigar[0] == 5):
+                offset = first_cigar[1]
+            else:
+                offset = 0
+
+            # Work out what's up with every query base from the MD tag
+            status_per_base = parse_MD_tag(read.get_tag("MD"), offset,
+                input_length)
+
+            
+                
+            print("Errors: {}: {} {}: {}".format(input_length / 2, status_per_base.has_key(input_length / 2),
+                input_length / 2 + 1, status_per_base.has_key(input_length / 2 + 1)))
+                
+            # Use truncating division to check around the center
+            if (status_per_base.has_key(input_length / 2) or
+                status_per_base.has_key(input_length / 2 + 1)):
+                
+                # There's a mismatch near the center
+                is_suspect = True
+        
+        # Re-parse with our code after fixing up the reference name.
+        # TODO ugly hack in need of redesign
+        parts = str(read).split("\t")
+        parts[2] = reference_name
+        our_read = Read("\t".join(parts))
+        
+        # Fix up the suspect flag
+        our_read.is_suspect = is_suspect
+        
+        yield our_read
+    
         
 def parse_and_deduplicate_sam(sam_input):
     """
@@ -190,25 +314,6 @@ def parse_and_deduplicate_sam(sam_input):
     
     Yields dicts form end number to Read object for each template.
     
-    TODO: fix this test to not be ugly.
-    >>> lines_in = ["ERR894727.320\\t2147\\tchr6_GL000254v2_alt\\t198561\\t60"
-    ... "\\t126M"
-    ... "\\t=\\t198968\\t533\\tNCACCATTGCACTCCAGCCTGGGCAACAAGAGTGAAACTCTGTCTCAA"
-    ... "AAAA"
-    ... "CAAACAAACAAACAACAACAACAACAGAAAACAGGGTGCAGCCCACTCCTCCAGCACCTTGAATCTGGTG"
-    ... "GGCT\\t'7<<BB<BBBB<B<BBB0<BBBBBB<<BBBBBBB7B<<BBB<0<BB<BB0<B<BBB<BBB<B<"
-    ... "<"
-    ... "<BB<BB<BB<BB<BBBBBBBBB<<0070BBBBB<B00<B<B0B07<00<B00B00<0<<<<<",
-    ... "ERR894727.320\\t2147\\tchr6_GL000255v2_alt\\t198391\\t60\\t126M\\t=\\t"
-    ... "198798"
-    ... "\\t533\\tNCACCATTGCACTCCAGCCTGGGCAACAAGAGTGAAACTCTGTCTCAAAAAACAAACA"
-    ... "AACAAACAACAACAACAACAGAAAACAGGGTGCAGCCCACTCCTCCAGCACCTTGAATCTGGTGGGCT"
-    ... "\\t"
-    ... "'7<<BB<BBBB<B<BBB0<BBBBBB<<BBBBBBB7B<<BBB<0<BB<BB0<B<BBB<BBB<B<<<BB<BB"
-    ... "<BB<BB<BBBBBBBBB<<0070BBBBB<B00<B<B0B07<00<B00B00<0<<<<<"]
-    >>> len(list(parse_and_deduplicate_sam(lines_in)))
-    1
-    
     """
     
     # What was the template for the last read
@@ -217,14 +322,8 @@ def parse_and_deduplicate_sam(sam_input):
     # For this template, we keep the best read for each end we find.
     reads_by_end = {}
     
-    for line in sam_input:
-        if line.startswith("@"):
-            # Pass headers through
-            yield line
-            continue
-    
-        # Parse the read
-        read = Read(line)
+    for read in pysam_parse_reads(sam_input):
+        # Work on the fixed up reads
         
         if read.template != last_template:
             
