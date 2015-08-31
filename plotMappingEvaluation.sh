@@ -89,7 +89,7 @@ do
                 "refonly" "trivial" "level1" "level2" "level3" \
                 --category_labels "Cactus" "Camel" "VG"  "Curoverse" "Simons SNPs" "1000G SNPs" "PRG" "k=31" "k=63"\
                 "RefOnly" "Trivial" "Level1" "Level2" "Level3" \
-                --colors "g" "y" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m" "c" "b" "c" "m" "y" \
+                --colors "#5C755E" "#C19A6B" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m" "c" "b" "c" "m" "y" \
                 --x_sideways \
                 --font_size 20 --dpi 90
         fi
@@ -106,7 +106,7 @@ do
                 "refonly" "trivial" "level1" "level2" "level3" \
                 --category_labels "Cactus" "Camel" "VG" "Curoverse" "Simons SNPs" "1000G SNPs" "PRG" "k=31" "k=63"\
                 "RefOnly" "Trivial" "Level1" "Level2" "Level3" \
-                --colors "g" "y" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m" "c" "b" "c" "m" "y" \
+                --colors "#5C755E" "#C19A6B" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m" "c" "b" "c" "m" "y" \
                 --x_sideways \
                 --font_size 20 --dpi 90
         fi
