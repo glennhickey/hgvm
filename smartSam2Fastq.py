@@ -46,7 +46,8 @@ def parse_args(args):
         formatter_class=argparse.RawDescriptionHelpFormatter)
     
     # General options
-    parser.add_argument("input_sam", type=str,
+    parser.add_argument("--input_sam", type=argparse.FileType("r"),
+        default=sys.stdin,
         help="input SAM in name-sorted order. Cannot be standard input.")
     parser.add_argument("--fq1", type=argparse.FileType("w"),
         default=sys.stdout,
@@ -102,6 +103,12 @@ class Read(object):
         self.sequence = parts[9]
         self.qualities = parts[10]
         
+        # Count edits
+        self.edits = float("inf")
+        for tag in parts[11:]:
+            if tag.startswith("NM:i:"):
+                self.edits = int(tag[5:])
+        
         
         
         if self.flags & BAM_FREVERSE:
@@ -115,9 +122,8 @@ class Read(object):
         # Grab the contig we mapped to
         self.contig = parts[2]
         
-        # Say we aren't suspect. We'll be marked suspect later by the better SAM
-        # parser.
-        self.is_suspect = False
+        # Say we are suspect if we're on an alt.
+        self.is_suspect = self.contig.endswith("_alt")
             
     def get_name(self):
         """
@@ -166,9 +172,11 @@ class Read(object):
         
         """
         
-        return (self.template == other.template and self.end == other.end and
-            (not self.is_suspect) and 
-            (len(self.sequence) > len(other.sequence) or other.is_suspect))
+        # Also just take ones with less edits if they aren't bad-looking
+        return (self.template == other.template and self.end == other.end and 
+            not (self.is_suspect and not other.is_suspect) and
+            (len(self.sequence) >= len(other.sequence) or 
+            self.edits <= other.edits))
             
     def __str__(self):
         """
@@ -322,23 +330,19 @@ def parse_and_deduplicate_sam(sam_input):
     # For this template, we keep the best read for each end we find.
     reads_by_end = {}
     
-    for read in pysam_parse_reads(sam_input):
-        # Work on the fixed up reads
+    for line in sam_input:
+        if line.startswith("@"):
+            continue
+            
+        read = Read(line)
+        
+        # Work on the reads
         
         if read.template != last_template:
             
-            all_ok = True
-            for end_read in reads_by_end.itervalues():
-                # Yield out the last state's reads.
-                
-                if(end_read.is_suspect):
-                    sys.stderr.write("Only suspect alignments found for end "
-                        "{} of template {}. Skipping.\n".format(end_read.end,
-                        end_read.template))
-                all_ok = False
-              
-            if all_ok:  
-                yield reads_by_end
+            # It's OK if we spit out suspect stuff as long as we got the best
+            # suspect alignment
+            yield reads_by_end
         
             # Start a new state
             last_template = read.template
@@ -361,18 +365,9 @@ def parse_and_deduplicate_sam(sam_input):
                     "{} of template {}:\n{}\n{}".format(read.end, read.template,
                     read.line, reads_by_end[read.end].line))
     
-    all_ok = True
-    for end_read in reads_by_end.itervalues():
-        # Yield out the last state's reads.
-        
-        if(end_read.is_suspect):
-            sys.stderr.write("Only suspect alignments found for end "
-                "{} of template {}. Skipping.\n".format(end_read.end,
-                end_read.template))
-        all_ok = False
-      
-    if all_ok:  
-        yield reads_by_end
+    # It's OK if we spit out suspect stuff as long as we got the best
+    # suspect alignment
+    yield reads_by_end
             
 def write_fastq(stream, read):
     """

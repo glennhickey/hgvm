@@ -21,19 +21,6 @@ ALT_URL="ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA_000001405.17_GRCh38.p2/GCA_0
 # Point at the correct sample to get reads from
 SAMPLE_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/hgsv_sv_discovery/data/HG00513/high_cov_alignment/HG00513.alt_bwamem_GRCh38DH.20150715.CHS.high_coverage.cram"
 
-# Say where to get Picard from and where it will go
-PICARD_VERSION="1.138"
-PICARD_DIR="picard-tools-${PICARD_VERSION}"
-PICARD_URL="https://github.com/broadinstitute/picard/releases/download/${PICARD_VERSION}/${PICARD_DIR}.zip"
-
-
-if [[ ! -d "${PICARD_DIR}" ]]
-then
-    # Install Picard
-    wget "${PICARD_URL}" -O "${PICARD_DIR}.zip"
-    unzip "${PICARD_DIR}.zip"
-fi
-
 # Make the output directory
 mkdir -p "${OUT_DIR}"
 
@@ -152,12 +139,8 @@ do
         echo "Splitting out reads into ${OUT_DIR}/${REGION}.1.fq and ${OUT_DIR}/${REGION}.2.fq..."
         #bedtools bamtofastq -i "${OUT_DIR}/${REGION}.bam" -fq "${OUT_DIR}/${REGION}.1.fq" -fq2 "${OUT_DIR}/${REGION}.2.fq" 2>/dev/null
         
-        # Run our new deduplicator/splitter, and throw away its errors because we know they will happen.
-        #samtools view "${OUT_DIR}/${REGION}.bam" | ./smartSam2Fastq.py --fq1 "${OUT_DIR}/${REGION}.1.fq" --fq2 "${OUT_DIR}/${REGION}.2.fq" 2>/dev/null
-        
-        # Run Picard and hope it knows how to properly decide what read
-        # sequences have been edited by bwa mam and what ones haven't.
-        java -jar "${PICARD_DIR}/picard.jar" SamToFastq INPUT="${OUT_DIR}/${REGION}.bam" FASTQ="${OUT_DIR}/${REGION}.1.fq" SECOND_END_FASTQ="${OUT_DIR}/${REGION}.2.fq" VALIDATION_STRINGENCY=SILENT
+        # Run our new deduplicator/splitter, which attempts to compensate for bwa mem read corruption
+        samtools view "${OUT_DIR}/${REGION}.bam" | ./smartSam2Fastq.py --fq1 "${OUT_DIR}/${REGION}.1.fq" --fq2 "${OUT_DIR}/${REGION}.2.fq"
     else
         echo "${OUT_DIR}/${REGION}.1.fq and ${OUT_DIR}/${REGION}.2.fq already created."
     fi
