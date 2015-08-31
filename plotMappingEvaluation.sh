@@ -85,10 +85,9 @@ do
             # Only ones with data are used
             ./barchart.py "${COLLATED_PRIMARY_FILE}" --title "$(printf "Perfectly mapped ${MODE}\nreads in ${REGION^^}")" \
                 --x_label "Graph" --y_label "Read Count" --save "${PLOTS_DIR}/${MODE}/primary-${REGION}.png" \
-                --min 0 --max "${MAX}" \
                 --categories "cactus" "camel" "vg" "curoverse" "simons" "snp1000g" "prg" "debruijn-k31" "debruijn-k63"\
                 "refonly" "trivial" "level1" "level2" "level3" \
-                --category_labels "Cactus" "Camel" "VG"  "Curoverse" "Simons" "1000G SNPs" "PRG" "k=31" "k=63"\
+                --category_labels "Cactus" "Camel" "VG"  "Curoverse" "Simons SNPs" "1000G SNPs" "PRG" "k=31" "k=63"\
                 "RefOnly" "Trivial" "Level1" "Level2" "Level3" \
                 --colors "g" "y" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m" "c" "b" "c" "m" "y" \
                 --x_sideways \
@@ -101,12 +100,11 @@ do
             # Now make the actual plot
             # Here we specify the order and colors for the different schemes
             # Only ones with data are used
-            ./barchart.py "${COLLATED_SECONDARY_FILE}" --title "$(printf "${MODE} reads in ${REGION^^}\nwithout good secondary alignments")" \
+            ./barchart.py "${COLLATED_SECONDARY_FILE}" --title "$(printf "Non-multimapped ${MODE}\nreads in ${REGION^^}")" \
                 --x_label "Graph" --y_label "$(printf "Portion Not\nMultimapped")" --save "${PLOTS_DIR}/${MODE}/secondary-${REGION}.png" \
-                --min 0 --max 1 \
                 --categories "cactus" "camel" "vg" "curoverse" "simons" "snp1000g" "prg" "debruijn-k31" "debruijn-k63"\
                 "refonly" "trivial" "level1" "level2" "level3" \
-                --category_labels "Cactus" "Camel" "VG" "Curoverse" "Simons" "1000G SNPs" "PRG" "k=31" "k=63"\
+                --category_labels "Cactus" "Camel" "VG" "Curoverse" "Simons SNPs" "1000G SNPs" "PRG" "k=31" "k=63"\
                 "RefOnly" "Trivial" "Level1" "Level2" "Level3" \
                 --colors "g" "y" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m" "c" "b" "c" "m" "y" \
                 --x_sideways \
