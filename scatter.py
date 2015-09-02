@@ -275,6 +275,12 @@ def main(args):
         # And log Y axis if desired.
         pyplot.yscale("log")
     
+    if options.dotplot:
+        # Turn off the x ticks
+        pyplot.gca().get_xaxis().set_ticks([])
+        # Set the plot bounds to just around the data
+        pyplot.xlim((-1, len(category_order)))    
+    
     # Apply any range restrictions
     if(options.min_x is not None):
         pyplot.xlim((options.min_x, pyplot.xlim()[1]))    

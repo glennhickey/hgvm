@@ -11,24 +11,28 @@ echo "`date`: Starting up on `hostname`..."
 # We need to append the server version to the URLs and the input TSV won't have it.
 VERSION="v0.6.g"
 
+# What kmer size to we use
+KMER_SIZE="10"
+
 # Skip the header. TODO: Make sure someone doesn't forget and have their first
 # input be silently discarded.
 read
 
-mkdir -p alignments
-mkdir -p stats
-mkdir -p plots
-mkdir -p graphs
+mkdir -p alignments || true
+mkdir -p stats || true
+mkdir -p plots || true
+mkdir -p graphs || true
 
 function run_stats {
-    # Call on a basename and a mode (real or sim)
+    # Call on a basename and a mode (real or sim) and a mapper
     local BASENAME="${1}"
     local MODE="${2}"
+    local MAPPER="${3}"
 
-    local STATS_DIR="stats/${MODE}/${REGION}"
-    local ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
+    local STATS_DIR="stats/${MAPPER}/${MODE}/${REGION}"
+    local ALIGNMENT="alignments/${MAPPER}/${MODE}/${BASENAME}.gam"
 
-    mkdir -p "${STATS_DIR}"
+    mkdir -p "${STATS_DIR}" || true
 
     echo "`date`: Extracting best scores..."
     vg view -aj "${ALIGNMENT}" | jq 'select(.is_secondary | not) | .score' | grep -v "null" > "${STATS_DIR}/${BASENAME}.scores.tsv"
@@ -57,14 +61,14 @@ function run_stats {
     echo "${MULTI_MAPPINGS}" > "${STATS_DIR}/${BASENAME}.multi.tsv"
     
     echo "`date`: Plotting..."
-    local PLOTS_DIR="plots/${MODE}/${REGION}"
-    mkdir -p "${PLOTS_DIR}/scores"
-    mkdir -p "${PLOTS_DIR}/secondary"
-    mkdir -p "${PLOTS_DIR}/matches"
+    local PLOTS_DIR="plots/${MAPPER}/${MODE}/${REGION}"
+    mkdir -p "${PLOTS_DIR}/scores" || true
+    mkdir -p "${PLOTS_DIR}/secondary" || true
+    mkdir -p "${PLOTS_DIR}/matches" || true
     
     # Plot the scores
     ./histogram.py "${STATS_DIR}/${BASENAME}.scores.tsv" \
-        --title "${MODE} Mapping Scores for ${BASENAME}" \
+        --title "${MODE} ${MAPPER} Mapping Scores for ${BASENAME}" \
         --x_label "Score" \
         --y_label "Read Count" \
         --x_min 0 \
@@ -73,7 +77,7 @@ function run_stats {
         
     # Plot the perfect match fractions (better since not all reads are the same length)
     ./histogram.py "${STATS_DIR}/${BASENAME}.matches.tsv" \
-        --title "${MODE} Mapping Identity (${PERFECT_MAPPINGS} perfect) for ${BASENAME}" \
+        --title "${MODE} ${MAPPER} Mapping Identity (${PERFECT_MAPPINGS} perfect) for ${BASENAME}" \
         --x_label "Match Fraction" \
         --y_label "Read Count" \
         --x_min 0 \
@@ -82,7 +86,7 @@ function run_stats {
         
     # Plot the perfect match fractions for secondary alignments
     ./histogram.py "${STATS_DIR}/${BASENAME}.secondary.tsv" \
-        --title "${MODE} Secondary Mapping Identity for ${BASENAME}" \
+        --title "${MODE} ${MAPPER} Secondary Mapping Identity for ${BASENAME}" \
         --x_label "Match Fraction" \
         --y_label "Read Count" \
         --x_min 0 \
@@ -123,41 +127,64 @@ do
     fi
     
     # Index it
-    echo "`date`: Indexing..."
+    echo "`date`: Indexing with RocksDB..."
     rm -rf "graphs/${BASENAME}.vg.index/"
-    vg index -s -k10 "graphs/${BASENAME}.vg"
+    vg index -s -k "${KMER_SIZE}" "graphs/${BASENAME}.vg"
+    echo "`date`: Indexing with xg..."
+    vg index -x "graphs/${BASENAME}.vg.xg" "graphs/${BASENAME}.vg"
+    echo "`date`: Indexing with GCSA2..."
+    # Die if index verification fails.
+    vg index -gV -k "${KMER_SIZE}" "graphs/${BASENAME}.vg" | grep "Index verification complete"
     
-    if [[ "${REGION}" != "cenx" ]]
-    then
-        # cenx doesn't ahve any simulated reads to run.
+    for MAPPER in gcsa rocksdb
+    do
     
-        # Do the sim reads
-        SIM_FILE="reads/trivial-${REGION^^}.txt"
+        if [[ "${REGION}" != "cenx" ]]
+        then
+            # cenx doesn't have any simulated reads to run.
         
-        echo "`date`: Aligning simulated reads..."
-        MODE="sim"
-        ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
+            # Do the sim reads
+            SIM_FILE="reads/trivial-${REGION^^}.txt"
+            
+            echo "`date`: Aligning simulated reads..."
+            MODE="sim"
+            ALIGNMENT="alignments/${MAPPER}/${MODE}/${BASENAME}.gam"
+            mkdir -p "alignments/${MAPPER}/${MODE}" || true
+            
+            case "${MAPPER}" in
+                rocksdb)
+                    time vg map -r "${SIM_FILE}" -n 3 -M 2 -k "${KMER_SIZE}" -d "graphs/${BASENAME}.vg.index/" "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+                    ;;
+                gcsa)
+                    time vg map -r "${SIM_FILE}" -n 3 -M 2 -k "${KMER_SIZE}" "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+                    ;;
+            esac
+            
+            run_stats "${BASENAME}" "${MODE}" "${MAPPER}"
+            
+        fi
         
-        time vg map -r "${SIM_FILE}" -n 3 -M 2 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+        # If we have already downloaded reads for the regions, they will be here.
+        # Upper-case the region name and add fastq extensions
+        FASTQ1="reads/${REGION^^}.1.fq"
+        FASTQ2="reads/${REGION^^}.2.fq"
         
-        run_stats "${BASENAME}" "${MODE}"
+        MODE="real"
+        ALIGNMENT="alignments/${MAPPER}/${MODE}/${BASENAME}.gam"
+        mkdir -p "alignments/${MAPPER}/${MODE}" || true
         
-    fi
-    
-    # If we have already downloaded reads for the regions, they will be here.
-    # Upper-case the region name and add fastq extensions
-    FASTQ1="reads/${REGION^^}.1.fq"
-    FASTQ2="reads/${REGION^^}.2.fq"
-    
-    MODE="real"
-    ALIGNMENT="alignments/${MODE}-${BASENAME}.gam"
-    
-    echo "`date`: Aligning real reads..."
-    time vg map -f "${FASTQ1}" -f "${FASTQ2}" -n 3 -M 2 "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
-    
-    run_stats "${BASENAME}" "${MODE}"
-    
-    echo "`date`: Surjecting..."
-    vg surject -p ref -d "graphs/${BASENAME}.vg.index" -b "alignments/${BASENAME}.gam" > "alignments/${BASENAME}.bam"
+        echo "`date`: Aligning real reads..."
+        case "${MAPPER}" in
+            rocksdb)
+                time vg map -f "${FASTQ1}" -f "${FASTQ2}" -n 3 -M 2 -k "${KMER_SIZE}" -d "graphs/${BASENAME}.vg.index/" "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+                ;;
+            gcsa)
+                time vg map -f "${FASTQ1}" -f "${FASTQ2}" -n 3 -M 2 -k "${KMER_SIZE}" "graphs/${BASENAME}.vg" > "${ALIGNMENT}"
+                ;;
+        esac
+        
+        run_stats "${BASENAME}" "${MODE}" "${MAPPER}"
+        
+    done
     
 done
