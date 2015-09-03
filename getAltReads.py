@@ -5,9 +5,12 @@ server in parallel, using Toil.
 
 """
 
-from toil.job import Job
 import argparse, sys, os, os.path, random, collections, shutil, itertools, glob
 import urllib2, urlparse, ftplib, fnmatch
+import json, logging, logging.handlers, SocketServer, struct, socket, threading
+import time
+
+from toil.job import Job
 import tsv
 
 def parse_args(args):
@@ -46,6 +49,8 @@ def parse_args(args):
         help="FTP directory to scan for samples")
     parser.add_argument("--sample_pattern", default="NA*", 
         help="fnmatch-style pattern for sample names")
+    parser.add_argument("--file_pattern", default="*.cram", 
+        help="fnmatch-style pattern for read files in sample directories")
     parser.add_argument("--sample_limit", type=int, default=100, 
         help="number of matching samples to download")
     parser.add_argument("out_dir",
@@ -58,6 +63,115 @@ def parse_args(args):
     return parser.parse_args(args)
 
 
+class LoggingDatagramHandler(SocketServer.DatagramRequestHandler):
+    """
+    Receive logging messages from the jobs and display them on the master.
+    
+    Uses length-prefixed JSON message encoding.
+    """
+    
+    def handle(self):
+        """
+        Handle messages coming in over self.connection.
+        
+        Messages are 4-byte-length-prefixed JSON-encoded logging module records.
+        """
+        
+        while True:
+            # Loop until we run out of messages
+        
+            # Parse the length
+            length_data = self.rfile.read(4)
+            if len(length_data) < 4:
+                # The connection was closed, or we didn't get enough data
+                # TODO: complain?
+                break
+                
+            # Actually parse the length
+            length = struct.unpack(">L", length_data)[0]
+            
+            # This is where we'll put the received message
+            message_parts = []
+            length_received = 0
+            while length_received < length:
+                # Keep trying to get enough data
+                part = self.rfile.read(length - length_received)
+                
+                length_received += len(part)
+                message_parts.append(part)
+                
+            # Stitch it all together
+            message = "".join(message_parts)
+
+            try:
+            
+                # Parse it as JSON
+                message_attrs = json.loads(message)
+                
+                # Fluff it up into a proper logging record
+                record = logging.makeLogRecord(message_attrs)
+            except:
+                logging.error("Malformed record")
+                
+            # TODO: do log level filtering
+            logging.getLogger("remote").handle(record)
+            
+class JSONDatagramHandler(logging.handlers.DatagramHandler):
+    """
+    Send logging records over UDP serialized as JSON.
+    """
+    
+    def makePickle(self, record):
+        """
+        Actually, encode the record as length-prefixed JSON instead.
+        """
+        
+        json_string = json.dumps(record.__dict__)
+        length = struct.pack(">L", len(json_string))
+        
+        return length + json_string
+        
+class RealTimeLogger(object):
+    """
+    All-static class for getting a logger that logs over UDP to the master.
+    """
+    
+    # We keep the master host and port as class data
+    master_host = None
+    master_port = None
+    
+    # Also the logger
+    logger = None
+  
+    @classmethod
+    def set_master(cls, options):
+        """
+        Set the master info.
+        
+        """
+        
+        cls.master_host = options.log_host
+        cls.master_port = options.log_port
+        
+        
+    @classmethod
+    def get(cls):
+        """
+        Get the logger that logs to master.
+        
+        Note that if the master logs here, you will see the message twice,
+        since it still goes to the normal log handlers too.
+        """
+        
+        if cls.logger is None:
+            # Only do the setup once, so we don't add a handler every time we
+            # log
+            cls.logger = logging.getLogger('realtime')
+            cls.logger.setLevel(logging.DEBUG)
+            cls.logger.addHandler(JSONDatagramHandler(cls.master_host,
+                cls.master_port))
+        
+        return cls.logger
 
 class HelloWorld(Job):
     def __init__(self):
@@ -83,11 +197,82 @@ class FollowOn(Job):
             with open(tempFilePath, "w") as localFile:
                localFile.write(globalFile.read())
 
+def ftp_connect(url):
+    """
+    Connect to an FTP server and go to the specified directory with FTPlib.
+    
+    Return the ftplib connection and the path.
+    """
+    
+    ftp_info = urlparse.urlparse(url)
+    assert(ftp_info.scheme == "ftp")
+    
+    # Connect to the server
+    ftp = ftplib.FTP(ftp_info.netloc, ftp_info.username, ftp_info.password)
+    
+    # Log in
+    ftp.login()
+        
+    # Go to the right directory
+    ftp.cwd(ftp_info.path)
+    
+    return ftp, ftp_info.path
+
+def explore_path(ftp, path, pattern):
+    """
+    Using the given FTP server connection, explore the given path recursively,
+    looking for all files that match the given fnmatch pattern. Yields the paths
+    of those files.
+    
+    """
+    
+    try:
+        ftp.cwd(path)
+        
+        # List of everything to recurse into
+        to_recurse_on = []
+        
+        for subitem in ftp.nlst():
+            # We don't know if these are files or directories.
+            
+            subitem_path = "{}/{}".format(path, subitem)
+            
+            if fnmatch.fnmatchcase(subitem, pattern):
+                # This is a matching thing!
+                yield subitem_path
+                
+            # Recurse on everything, even things that match the pattern, in case
+            # they are directories.
+            to_recurse_on.append(subitem_path)
+            
+        for item in to_recurse_on:
+            # Recurse down on each thing in turn
+            for found in explore_path(ftp, item, pattern):
+                # Yield anything we find there
+                yield found
+            # Then return to this directory so we're in a known place
+            ftp.cwd(path)
+            
+    except ftplib.error_perm as e:
+        error_code = int(e.args[0][:3])
+        if error_code == 550:
+            # We expect to do a lot of CWD-ing to files, raising this
+            pass
+        else:
+            raise e
+          
+        
+
 def downloadAllReads(job, options):
     """
     Download all the reads for the regions.
     
     """
+    
+    # Initialize logging
+    RealTimeLogger.set_master(options)
+    
+    RealTimeLogger.get().info("Starting download")
     
     # First make the output directory
     if not os.path.exists(options.out_dir):
@@ -97,7 +282,7 @@ def downloadAllReads(job, options):
         except OSError:
             # If you can't make it, maybe someone else did?
             pass
-    
+            
     # Whatever happens, it needs to exist here
     assert(os.path.exists(options.out_dir) and os.path.isdir(options.out_dir))
     
@@ -112,11 +297,15 @@ def downloadAllReads(job, options):
     # The reference range gets added in last
     ranges_by_region = collections.defaultdict(list)
     
+    # Hard-code some regions that aren't real
+    ranges_by_region["BRCA1"] = ["chr17:43044294-43125482"]
+    ranges_by_region["BRCA2"] = ["chr13:32314861-32399849"]
+    ranges_by_region["CENX"] = ["chrX:58605580-6241254"]
+    
     # Read the reference database
     database = tsv.TsvReader(urllib2.urlopen(options.reference_metadata))
     
     for parts in database:
-        print parts
         # Parse out all the info for this alt and its parent chromosome
         region_name = parts[7]
         # Grab the chromosome ("1" or "X") that's the parent
@@ -151,61 +340,103 @@ def downloadAllReads(job, options):
             region_stops[region_name]))
             
 
-    # TODO: Download the sample list
-    # Parse the sample directory to get the host and path
-    ftp_info = urlparse.urlparse(options.sample_ftp_root)
-    assert(ftp_info.scheme == "ftp")
-    
-    # Connect to the server
-    ftp = ftplib.FTP(ftp_info.netloc, ftp_info.username, ftp_info.password)
-    
-    # Log in
-    ftp.login()
-        
-    # Go to the right directory
-    ftp.cwd(ftp_info.path)
+    ftp, root_path = ftp_connect(options.sample_ftp_root)
     
     # Grab the right number of sample names that match the pattern from the
     # FTP directory listing.
-    sample_names = itertools.islice(
+    sample_names = list(itertools.islice(
         (n for n in ftp.nlst() if fnmatch.fnmatchcase(n,
-        options.sample_pattern)), options.sample_limit)
-    
-    # Compose URLs for all of them and store them under the sample names
+        options.sample_pattern)), options.sample_limit))
+        
+    # Compose URLs for all the sample directories
     sample_urls = {name: "{}/{}".format(options.sample_ftp_root, name)
         for name in sample_names}
+        
+    RealTimeLogger.get().info("Got {} sample URLs".format(len(sample_urls)))
     
-    for region_name in region_chromosomes.iterkeys():
+    for region_name in options.regions:
         for sample_name, sample_url in sample_urls.iteritems():
             
             # Where will this sample's BAM for this region go?
             bam_filename = "{}/{}/{}.bam".format(options.out_dir, region_name,
                 sample_name)
             
+            RealTimeLogger.get().info("Making child for {} x {}: {}".format(
+                region_name, sample_name, sample_url))
+            
             # Now kick off a job to download all the ranges for the region in
             # parallel for this sample, and then concatenate them together. Tell
             # it to save the results to a file on a shared filesystem.
-            job.addChildFn(downloadRegion, region_name, sample_url,
-                ranges_by_region[region_name], bam_filename, 
-                cores=1, memory="4G", disk="50G")
+            job.addChildJobFn(downloadRegion, options, region_name, 
+                sample_url, ranges_by_region[region_name], bam_filename, 
+                cores=1, memory="1G", disk=0)
+                
+    RealTimeLogger.get().info("Done making children")
    
-def downloadRegion(job, region_name, sample_url, range_list, bam_filename):
+def downloadRegion(job, options, region_name, sample_url, range_list,
+    bam_filename):
     """
     Download all the ranges given for the given region from the given sample
     URL, concatenate them, and save them to the given BAM.
     
     """
     
+    RealTimeLogger.set_master(options)
+    
     # TODO: implement
-    print("Supposed to download {} ranges {} to {}".format(sample_url,
-        range_list, bam_filename))
-
+    RealTimeLogger.get().info("Supposed to download {} ranges {} to {}".format(
+        sample_url, range_list, bam_filename))
+        
+    # Connect to the FTP server
+    ftp, root_path = ftp_connect(sample_url)
+        
+    # Find all the actual data files
+    file_paths = list(explore_path(ftp, root_path, options.file_pattern))
+    
+    # Make them into URLs
+    file_urls = [sample_url.replace(root_path, file_path)
+        for file_path in file_paths]
+        
+    RealTimeLogger.get().info("Need URLs: {}".format(file_urls))
+        
+        
 def main():
     options = parse_args(sys.argv) # This holds the nicely-parsed options object
     
+    logging.basicConfig(level=logging.DEBUG)
+    
+    # Start up the logging server
+    logging_server = SocketServer.ThreadingUDPServer(("0.0.0.0", 0),
+        LoggingDatagramHandler)
+        
+    print("Starting server")
+    # Set up a thread to do all the serving in the background and exit when we
+    # do
+    server_thread = threading.Thread(target=logging_server.serve_forever)
+    server_thread.daemon = True
+    server_thread.start()
+    print("Server started")
+    
+    # HACK: Set options for logging and pass the options to every target
+    options.log_host = socket.getfqdn()
+    options.log_port = logging_server.server_address[1]
+    
+    RealTimeLogger.set_master(options)
+    
+    logger = RealTimeLogger.get()
+    
+    # Make the root job
+    root_job = Job.wrapJobFn(downloadAllReads, options, 
+        cores=1, memory="1G", disk=0)
+        
+    print("Sending log from master")
+    logger.info("This is the master")
+    
     # Run Toil
-    Job.Runner.startToil(Job.wrapJobFn(downloadAllReads, options,
-        cores=1, memory="1G", disk=0),  options)
+    Job.Runner.startToil(root_job,  options)
+        
+    logging_server.shutdown()
+    server_thread.join()
 
 if __name__=="__main__":
     sys.exit(main())
