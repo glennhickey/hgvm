@@ -6,7 +6,7 @@ server in parallel, using Toil.
 """
 
 import argparse, sys, os, os.path, random, collections, shutil, itertools, glob
-import urllib2, urlparse, ftplib, fnmatch
+import urllib2, urlparse, ftplib, fnmatch, subprocess
 import json, logging, logging.handlers, SocketServer, struct, socket, threading
 import time
 
@@ -51,8 +51,10 @@ def parse_args(args):
         help="fnmatch-style pattern for sample names")
     parser.add_argument("--file_pattern", default="*.cram", 
         help="fnmatch-style pattern for read files in sample directories")
-    parser.add_argument("--sample_limit", type=int, default=100, 
+    parser.add_argument("--sample_limit", type=int, default=2, 
         help="number of matching samples to download")
+    parser.add_argument("--ftp_retry", default="1", 
+        help="number of times to retry sample downloads")
     parser.add_argument("out_dir",
         help="output directory to create and fill with per-region BAM files")
     
@@ -398,7 +400,93 @@ def downloadRegion(job, options, region_name, sample_url, range_list,
         for file_path in file_paths]
         
     RealTimeLogger.get().info("Need URLs: {}".format(file_urls))
+    
+    # For each URL and region combination, we get a promise of a returned file
+    # store file ID. This holds them.
+    part_promises = []
+    
+    for file_url in file_urls:
+        # For every file
+        for range_string in range_list:
+            # For every range we want from it, set up a child job to grab it
+            # that returns a file store ID for the BAM file it gets. Right now
+            # these are promises, but they get filled in later.
+            part_promises.append(job.addChildJobFn(downloadRange, options,
+                file_url, range_string, cores=1, memory="1G", disk="50G").rv())
+                
+    # Make a follow-on that concatenates the parts together
+    job.addFollowOnJobFn(concatAndSortBams, options, part_promises,
+        bam_filename, cores=1, memory="4G", disk="50G")
         
+        
+def downloadRange(job, options, file_url, range_string):
+    """
+    Download the given range from the given HTSlib file, put the resultiung BAM
+    in the file store, and return its file ID.
+    
+    """
+    
+    RealTimeLogger.set_master(options)
+    
+    # Where should we save the bam locally?
+    bam_filename = "{}/download.bam".format(job.fileStore.getLocalTempDir())
+    
+    # We will retry this if needed
+    try_number = 0
+   
+    while True:
+        try:
+            # Try running the download
+            RealTimeLogger.get().info("Trying to download {} from {}".format(
+                range_string, file_url))
+            subprocess.check_call(["samtools", "view", "-b", "-o", bam_filename,
+                file_url, range_string])
+            break
+        except Exception as e:
+            if try_number >= options.ftp_retry:
+                # Just die
+                raise e
+            else:
+                # Complain we need to retry
+                RealTimeLogger.get().warning(
+                    "Need to retry download of {}".format(file_url))
+                    
+                # Retry after a bit
+                thread.sleep(10)
+                try_number += 1
+                
+    # Now put the BAM in the file store and return its ID
+    file_id = job.fileStore.writeGlobalFile(bam_filename)
+    
+    return file_id
+    
+def concatAndSortBams(job, options, bam_ids, output_filename):
+    """
+    Takes in a list of BAM file IDs in the file store, concatenates and sorts
+    them by template name, and puts the result in the specified shared
+    filesystem file.
+    
+    """
+    
+    RealTimeLogger.set_master(options)
+    
+    RealTimeLogger.get().info("Building {} from IDs {}".format(output_filename,
+        bam_ids))
+    
+    # Where do we put the concatenated bam?
+    concat_filename = "{}/concat.bam".format(job.fileStore.getLocalTempDir())
+    
+    # What input BAMs do we want?
+    input_files = [job.fileStore.readGlobalFile(bam_id) for bam_id in bam_ids]
+    
+    # Do the concatenation
+    subprocess.check_call(["samtools", "cat", "-o", concat_filename] + input_files)
+    
+    # Do the sort directly into the output file
+    subprocess.check_call(["samtools", "sort", "-n", "-o", output_filename])
+    
+            
+    
         
 def main():
     options = parse_args(sys.argv) # This holds the nicely-parsed options object
