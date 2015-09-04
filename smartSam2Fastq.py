@@ -55,6 +55,8 @@ def parse_args(args):
     parser.add_argument("--fq2", type=argparse.FileType("w"),
         default=sys.stdout,
         help="FASTQ file to save all the READ2 reads in")
+    parser.add_argument("--interleaved", action="store_true",
+        help="write interleaved FASTQ to fq1")
     
     # The command line arguments start with the program name, which we don't
     # want to treat as an argument for argparse. So we remove it.
@@ -292,8 +294,10 @@ def pysam_parse_reads(sam_file):
 
             
                 
-            print("Errors: {}: {} {}: {}".format(input_length / 2, status_per_base.has_key(input_length / 2),
-                input_length / 2 + 1, status_per_base.has_key(input_length / 2 + 1)))
+            print("Errors: {}: {} {}: {}".format(input_length / 2, 
+                status_per_base.has_key(input_length / 2),
+                input_length / 2 + 1, 
+                status_per_base.has_key(input_length / 2 + 1)))
                 
             # Use truncating division to check around the center
             if (status_per_base.has_key(input_length / 2) or
@@ -398,7 +402,12 @@ def main(args):
             
         # Split up the reads to their files
         write_fastq(options.fq1, reads_by_end[1])
-        write_fastq(options.fq2, reads_by_end[2])
+        
+        if options.interleaved:
+            # Both go to the same file
+            write_fastq(options.fq1, reads_by_end[2])
+        else:
+            write_fastq(options.fq2, reads_by_end[2])
         
     
     

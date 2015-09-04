@@ -358,10 +358,23 @@ def downloadAllReads(job, options):
     
     for region_name in options.regions:
         for sample_name, sample_url in sample_urls.iteritems():
+        
+            # Make sure the sample directory exists
+            sample_dir = "{}/{}/{}".format(options.out_dir, region_name,
+                sample_name)
+            
+            if not os.path.exists(sample_dir):
+                try:
+                    # Make it if it doesn't exist
+                    os.makedirs(sample_dir)
+                except OSError:
+                    # If you can't make it, maybe someone else did?
+                    pass
+                    
+            assert(os.path.exists(sample_dir) and os.path.isdir(sample_dir))
             
             # Where will this sample's BAM for this region go?
-            bam_filename = "{}/{}/{}.bam".format(options.out_dir, region_name,
-                sample_name)
+            bam_filename = "{}/{}.bam".format(sample_dir, sample_name)
             
             RealTimeLogger.get().info("Making child for {} x {}: {}".format(
                 region_name, sample_name, sample_url))
@@ -408,18 +421,25 @@ def downloadRegion(job, options, region_name, sample_url, range_list,
     for file_url in file_urls:
         # For every file
         for range_string in range_list:
-            # For every range we want from it, set up a child job to grab it
-            # that returns a file store ID for the BAM file it gets. Right now
-            # these are promises, but they get filled in later.
+            # For every range we want from it...
+            
+            # Make a file that will live through us and our follow-ons.
+            # TODO: When/if actual global files become a thing, don't do that.
+            file_id = job.fileStore.getEmptyFileStoreID()
+            
+            # Set up a child job to grab it that returns a file store ID for the
+            # BAM file it gets. Right now these are promises, but they get
+            # filled in later.
             part_promises.append(job.addChildJobFn(downloadRange, options,
-                file_url, range_string, cores=1, memory="1G", disk="50G").rv())
+                file_url, range_string, file_id, cores=1, memory="1G",
+                disk="50G").rv())
                 
     # Make a follow-on that concatenates the parts together
     job.addFollowOnJobFn(concatAndSortBams, options, part_promises,
         bam_filename, cores=1, memory="4G", disk="50G")
         
         
-def downloadRange(job, options, file_url, range_string):
+def downloadRange(job, options, file_url, range_string, file_id=None):
     """
     Download the given range from the given HTSlib file, put the resultiung BAM
     in the file store, and return its file ID.
@@ -452,11 +472,31 @@ def downloadRange(job, options, file_url, range_string):
                     "Need to retry download of {}".format(file_url))
                     
                 # Retry after a bit
-                thread.sleep(10)
+                time.sleep(10)
                 try_number += 1
                 
-    # Now put the BAM in the file store and return its ID
-    file_id = job.fileStore.writeGlobalFile(bam_filename)
+    if file_id is None:
+        # Put the BAM in the file store with a new ID
+        file_id = job.fileStore.writeGlobalFile(bam_filename)
+    else:
+        # Put the BAM in the file store with the given existing ID. This
+        # prevents it from vanishing when this jhob and all its "global" files
+        # are cleaned up.
+        job.fileStore.updateGlobalFile(file_id, bam_filename)
+    
+    RealTimeLogger.get().info("Wrote file to ID {}".format(file_id))
+    
+    with job.fileStore.readGlobalFileStream(file_id) as test_stream:
+        data = test_stream.read(1)
+        
+        if len(data) == 0:
+            # There shoulod be at least one byte
+            raise RuntimeError(
+                "Could not read from just written global file {}".format(
+                file_id))
+        else:
+            RealTimeLogger.get().info("First byte of global file: {}".format(
+                ord(data[0])))
     
     return file_id
     
@@ -466,6 +506,9 @@ def concatAndSortBams(job, options, bam_ids, output_filename):
     them by template name, and puts the result in the specified shared
     filesystem file.
     
+    Also creates an interleaved FASTQ file of the paired reads at
+    <output_filename>.fq
+    
     """
     
     RealTimeLogger.set_master(options)
@@ -474,19 +517,56 @@ def concatAndSortBams(job, options, bam_ids, output_filename):
         bam_ids))
     
     # Where do we put the concatenated bam?
-    concat_filename = "{}/concat.bam".format(job.fileStore.getLocalTempDir())
+    concat_filename = "{}/concat.bam".format(
+        job.fileStore.getLocalTempDir())
     
-    # What input BAMs do we want?
-    input_files = [job.fileStore.readGlobalFile(bam_id) for bam_id in bam_ids]
+    if len(bam_ids) > 1:
+        RealTimeLogger.get().info("Concatenating...")
+        
+        # What input BAMs do we want?
+        input_files = [job.fileStore.readGlobalFile(bam_id)
+            for bam_id in bam_ids]
+        
+        # Do the concatenation
+        subprocess.check_call(["samtools", "cat", "-o", concat_filename] +
+            input_files)
+    elif len(bam_ids) == 1:
+        RealTimeLogger.get().info("Skip concatenation...")
+        
+        # Just grab the file for the one BAM
+        job.fileStore.readGlobalFile(bam_ids[0], concat_filename)
+    else:
+        raise RuntimeError("Got no BAM parts!")
     
-    # Do the concatenation
-    subprocess.check_call(["samtools", "cat", "-o", concat_filename] + input_files)
+    RealTimeLogger.get().info("Creating {}".format(output_filename))
     
-    # Do the sort directly into the output file
-    subprocess.check_call(["samtools", "sort", "-n", "-o", output_filename])
+    # Make up a prefix for sort. It gets .bam appended
+    sort_prefix = "{}/sort".format(job.fileStore.getLocalTempDir())
     
-            
+    # Do the sort into the temp file
+    subprocess.check_call(["samtools", "sort", "-n", concat_filename,
+        sort_prefix])
     
+    
+    
+    # Convert to FASTQ
+    # Decide on the temp filename
+    fastq_filename = "{}/reads.fq".format(job.fileStore.getLocalTempDir())
+    RealTimeLogger.get().info("Creating {}.fq".format(output_filename))
+    
+    # View the sam and pipe it through the sort of smart converter
+    view = subprocess.Popen(["samtools", "view", "{}.bam".format(sort_prefix)],
+        stdout=subprocess.PIPE)
+    subprocess.check_call(["./smartSam2Fastq.py", "--interleaved", "--fq1",
+        fastq_filename], stdin=view.stdout)
+    
+    # Wait and detect errors
+    view.wait()
+    assert(view.returncode == 0)
+    
+    # Move it
+    shutil.move("{}.bam".format(sort_prefix), output_filename)
+    shutil.move(fastq_filename, "{}.fq".format(output_filename))
         
 def main():
     options = parse_args(sys.argv) # This holds the nicely-parsed options object
