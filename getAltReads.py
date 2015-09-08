@@ -51,7 +51,7 @@ def parse_args(args):
         help="fnmatch-style pattern for sample names")
     parser.add_argument("--file_pattern", default="*.cram", 
         help="fnmatch-style pattern for read files in sample directories")
-    parser.add_argument("--sample_limit", type=int, default=2, 
+    parser.add_argument("--sample_limit", type=int, default=100, 
         help="number of matching samples to download")
     parser.add_argument("--ftp_retry", type=int, default=float("inf"), 
         help="number of times to retry sample downloads")
