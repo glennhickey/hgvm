@@ -53,7 +53,7 @@ def parse_args(args):
         help="fnmatch-style pattern for read files in sample directories")
     parser.add_argument("--sample_limit", type=int, default=2, 
         help="number of matching samples to download")
-    parser.add_argument("--ftp_retry", default="1", 
+    parser.add_argument("--ftp_retry", type=int, default=float("inf"), 
         help="number of times to retry sample downloads")
     parser.add_argument("out_dir",
         help="output directory to create and fill with per-region BAM files")
@@ -198,27 +198,73 @@ class FollowOn(Job):
         with fileStore.readGlobalFileStream(self.fileId) as globalFile:
             with open(tempFilePath, "w") as localFile:
                localFile.write(globalFile.read())
+               
+def backoff_times(retries=float("inf"), base_delay=300):
+    """
+    A generator that yields times for exponential back-off. Always yields 0
+    first, and then if you have nonzero retries it yields exponentially but
+    randomly increasing times in seconds to wait before trying again, stopping
+    at the specified number of retries (and continuing forever by default).
+    
+    You have to do the error catching and sleeping yourself.
+    
+    Raises an exception if you use up all your backoff times.
+    """
+    
+    # Don't wait at all before the first try
+    yield 0
+    
+    # What retry are we on?
+    try_number = 1
+    
+    # Make a delay that increases
+    delay = float(base_delay) * 2
+    
+    while try_number <= retries:
+        # Wait a random amount between 0 and 2^try_number * base_delay
+        yield random.uniform(base_delay, delay)
+        delay *= 2
+        try_number += 1
+        
+    raise RuntimeError("Ran out of retries")
 
-def ftp_connect(url):
+def ftp_connect(url, retries=float("inf")):
     """
     Connect to an FTP server and go to the specified directory with FTPlib.
     
     Return the ftplib connection and the path.
+    
+    On errors like timeouts, retry up to the given number of retries (infinite
+    by default) with exponential back-off.
+    
     """
     
-    ftp_info = urlparse.urlparse(url)
-    assert(ftp_info.scheme == "ftp")
-    
-    # Connect to the server
-    ftp = ftplib.FTP(ftp_info.netloc, ftp_info.username, ftp_info.password)
-    
-    # Log in
-    ftp.login()
+    for delay in backoff_times(retries=retries):
+        if delay > 0:
+            # We have to wait before trying again
+            RealTimeLogger.get().info("Retry after {} seconds".format(delay))
+            time.sleep(delay)
+        try:
         
-    # Go to the right directory
-    ftp.cwd(ftp_info.path)
-    
-    return ftp, ftp_info.path
+            ftp_info = urlparse.urlparse(url)
+            assert(ftp_info.scheme == "ftp")
+            
+            # Connect to the server
+            ftp = ftplib.FTP(ftp_info.netloc, ftp_info.username, ftp_info.password)
+            
+            # Log in
+            ftp.login()
+                
+            # Go to the right directory
+            ftp.cwd(ftp_info.path)
+            
+            return ftp, ftp_info.path
+            
+        except IOError as e:
+            # Something went wrong doing the IO
+            RealTimeLogger.get().warning(
+                "Retry after FTP setup IO error: {}".format(e))
+            
 
 def explore_path(ftp, path, pattern):
     """
@@ -302,7 +348,7 @@ def downloadAllReads(job, options):
     # Hard-code some regions that aren't real
     ranges_by_region["BRCA1"] = ["chr17:43044294-43125482"]
     ranges_by_region["BRCA2"] = ["chr13:32314861-32399849"]
-    ranges_by_region["CENX"] = ["chrX:58605580-6241254"]
+    ranges_by_region["CENX"] = ["chrX:58605580-62412542"]
     
     # Read the reference database
     database = tsv.TsvReader(urllib2.urlopen(options.reference_metadata))
@@ -406,6 +452,7 @@ def downloadRegion(job, options, region_name, sample_url, range_list,
     ftp, root_path = ftp_connect(sample_url)
         
     # Find all the actual data files
+    # TODO: Acount for FTP connection dropping?
     file_paths = list(explore_path(ftp, root_path, options.file_pattern))
     
     # Make them into URLs
@@ -451,29 +498,43 @@ def downloadRange(job, options, file_url, range_string, file_id=None):
     # Where should we save the bam locally?
     bam_filename = "{}/download.bam".format(job.fileStore.getLocalTempDir())
     
-    # We will retry this if needed
-    try_number = 0
-   
-    while True:
+    for delay in backoff_times(retries=options.ftp_retry):
+        if delay > 0:
+            # We have to wait before trying again
+            RealTimeLogger.get().info("Retry after {} seconds".format(delay))
+            time.sleep(delay)
         try:
             # Try running the download
             RealTimeLogger.get().info("Trying to download {} from {}".format(
                 range_string, file_url))
             subprocess.check_call(["samtools", "view", "-b", "-o", bam_filename,
                 file_url, range_string])
-            break
-        except Exception as e:
-            if try_number >= options.ftp_retry:
-                # Just die
-                raise e
+                
+            # Make sure there's actually reads in its file.
+            lines = subprocess.check_output(["samtools", "flagstat",
+                bam_filename])
+                
+            # Badly parse the flagstat output for the very first number (QC-
+            # passed reads)
+            reads_found = int(lines.split()[0])
+                
+            if reads_found > 0:
+                
+                # If we get here it worked
+                break
             else:
+                # Complain we downloaded and there were no reads
+                RealTimeLogger.get().warning(
+                    "No reads! Need to retry download of {}".format(file_url))
+                    
+            # TODO: Catch a partial download somehow
+        except subprocess.CalledProcessError as e:
                 # Complain we need to retry
                 RealTimeLogger.get().warning(
                     "Need to retry download of {}".format(file_url))
+                # But keep loping
                     
-                # Retry after a bit
-                time.sleep(10)
-                try_number += 1
+                
                 
     if file_id is None:
         # Put the BAM in the file store with a new ID
@@ -485,18 +546,6 @@ def downloadRange(job, options, file_url, range_string, file_id=None):
         job.fileStore.updateGlobalFile(file_id, bam_filename)
     
     RealTimeLogger.get().info("Wrote file to ID {}".format(file_id))
-    
-    with job.fileStore.readGlobalFileStream(file_id) as test_stream:
-        data = test_stream.read(1)
-        
-        if len(data) == 0:
-            # There shoulod be at least one byte
-            raise RuntimeError(
-                "Could not read from just written global file {}".format(
-                file_id))
-        else:
-            RealTimeLogger.get().info("First byte of global file: {}".format(
-                ord(data[0])))
     
     return file_id
     
