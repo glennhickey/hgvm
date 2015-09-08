@@ -402,6 +402,9 @@ def downloadAllReads(job, options):
         
     RealTimeLogger.get().info("Got {} sample URLs".format(len(sample_urls)))
     
+    # Make sure we got as many as we wanted.
+    assert(len(sample_urls) == options.sample_limit)
+    
     for region_name in options.regions:
         for sample_name, sample_url in sample_urls.iteritems():
         
