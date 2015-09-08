@@ -51,6 +51,10 @@ def parse_args(args):
         help="fnmatch-style pattern for sample names")
     parser.add_argument("--file_pattern", default="*.cram", 
         help="fnmatch-style pattern for read files in sample directories")
+    parser.add_argument("--index_pattern", default="*.cram.crai", 
+        help="fnmatch-style pattern for index files in sample directories")
+    parser.add_argument("--min_indexed_contigs", type=int, default=1000,
+        help="reject samples with indexes not covering this many contigs")
     parser.add_argument("--sample_limit", type=int, default=100, 
         help="number of matching samples to download")
     parser.add_argument("--ftp_retry", type=int, default=float("inf"), 
@@ -175,30 +179,6 @@ class RealTimeLogger(object):
         
         return cls.logger
 
-class HelloWorld(Job):
-    def __init__(self):
-        Job.__init__(self,  memory=100000, cores=2, disk=20000)
-    def run(self, fileStore):
-        fileId = fileStore.getEmptyFileStoreID()
-        self.addChild(Job.wrapJobFn(childFn, fileId,
-            cores=1, memory="1M", disk="10M"))
-        self.addFollowOn(FollowOn(fileId))
-
-def childFn(target, fileID):
-    with target.fileStore.updateGlobalFileStream(fileID) as file:
-        file.write("Hello, World!")
-
-class FollowOn(Job):
-    def __init__(self,fileId):
-        Job.__init__(self)
-        self.fileId=fileId
-    def run(self, fileStore):
-        tempDir = fileStore.getLocalTempDir()
-        tempFilePath = "/".join([tempDir,"LocalCopy"])
-        with fileStore.readGlobalFileStream(self.fileId) as globalFile:
-            with open(tempFilePath, "w") as localFile:
-               localFile.write(globalFile.read())
-               
 def backoff_times(retries=float("inf"), base_delay=300):
     """
     A generator that yields times for exponential back-off. Always yields 0
@@ -310,7 +290,63 @@ def explore_path(ftp, path, pattern):
             raise e
           
         
-
+def count_indexed_contigs(index_url, retries):
+    """
+    Given the URL of a .crai index file, count the number of distinct contigs in
+    the index and return it.
+    
+    Basically: curl url | zcat | cut -f1 | uniq | wc -l
+    """
+    
+    for delay in backoff_times(retries=retries):
+        if delay > 0:
+            # We have to wait before trying again
+            RealTimeLogger.get().info("Retry after {} seconds".format(delay))
+            time.sleep(delay)
+        try:
+        
+            # Hold all the popen objects we need for this
+            tasks = []
+            
+            # Do the download
+            tasks.append(subprocess.Popen(["curl", index_url],
+                stdout=subprocess.PIPE))
+            
+            # Pipe through zcat
+            tasks.append(subprocess.Popen(["zcat"], stdin=tasks[-1].stdout,
+                stdout=subprocess.PIPE))
+            
+            # And cut
+            tasks.append(subprocess.Popen(["cut", "-f1"], stdin=tasks[-1].stdout,
+                stdout=subprocess.PIPE))
+                
+            # And uniq
+            tasks.append(subprocess.Popen(["uniq"], stdin=tasks[-1].stdout,
+                stdout=subprocess.PIPE))
+                
+            # And wc
+            output = subprocess.check_output(["wc", "-l"],
+                stdin=tasks[-1].stdout)
+            
+            # Did we make it through all the tasks OK?
+            success = True
+            for task in tasks:
+                if task.wait() != 0:
+                    RealTimeLogger.get().warning(
+                        "Pipeline failed: {}".format(index_url)) 
+                    success = False
+                    break
+                    
+            if success:
+                # The pipeline worked.
+                # Parse and return the line count
+                return int(output.strip())
+            
+        except subprocess.CalledProcessError as e:
+            # Something went wrong doing the IO
+            RealTimeLogger.get().warning(
+                "Pipeline failed: {}".format(e)) 
+    
 def downloadAllReads(job, options):
     """
     Download all the reads for the regions.
@@ -390,15 +426,57 @@ def downloadAllReads(job, options):
 
     ftp, root_path = ftp_connect(options.sample_ftp_root)
     
-    # Grab the right number of sample names that match the pattern from the
-    # FTP directory listing.
-    sample_names = list(itertools.islice(
-        (n for n in ftp.nlst() if fnmatch.fnmatchcase(n,
-        options.sample_pattern)), options.sample_limit))
-        
+    # Calculate the FTP base URL (without directory). We need it later for
+    # turning found index files into URLs.
+    base_url = options.sample_ftp_root[:-len(root_path)]
+    
+    # Grab all the sample names that match the sample name pattern.
+    # Hopefully there aren't too many.
+    sample_names = [n for n in ftp.nlst() if fnmatch.fnmatchcase(n,
+        options.sample_pattern)]
+    
+    # Only take samples that have an index and for which the index covers at
+    # least a threshold number of contigs. This is a heuristic for finding the
+    # samples that are actually aligned to and indexed on the alts.
+    accepted_samples = set()
+    
+    # Dump the good samples to a file
+    good_samples = open("{}/good.txt".format(options.out_dir), "w")
+    
+    # TODO: handle failures during explore_path?
+    for sample_name in sample_names:
+        # For every sample
+        for index_name in explore_path(ftp, "{}/{}".format(root_path,
+            sample_name), options.index_pattern):
+            # Find its indexes (there ouyght to only be one)
+            
+            # Count up the contigs it indexes over
+            indexed_contigs = count_indexed_contigs("{}/{}".format(
+                base_url, index_name), options.ftp_retry)
+                
+            if indexed_contigs >= options.min_indexed_contigs:
+                # This sample is good enough
+                accepted_samples.add(sample_name)
+                RealTimeLogger.get().info(
+                    "Sample {} has {} contigs".format(sample_name,
+                    indexed_contigs))
+                # Add the sample to the file we spit out
+                good_samples.write("{}\n".format(sample_name))
+            else:
+                # Complain
+                RealTimeLogger.get().warning(
+                    "Sample {} is on too few contigs ({}). Skipping!".format(
+                    sample_name, indexed_contigs))
+                
+        if len(accepted_samples) >= options.sample_limit:
+            # We got enough
+            break
+            
+    good_samples.close()
+            
     # Compose URLs for all the sample directories
     sample_urls = {name: "{}/{}".format(options.sample_ftp_root, name)
-        for name in sample_names}
+        for name in accepted_samples}
         
     RealTimeLogger.get().info("Got {} sample URLs".format(len(sample_urls)))
     
