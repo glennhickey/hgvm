@@ -9,6 +9,7 @@ BAM files with reads must have been already downloaded.
 
 import argparse, sys, os, os.path, random, subprocess, shutil, itertools, glob
 import doctest, re, json, collections
+import logging, logging.handlers, SocketServer, struct, socket, threading
 
 from toil.job import Job
 
@@ -51,6 +52,158 @@ def parse_args(args):
         
     return parser.parse_args(args)
     
+class LoggingDatagramHandler(SocketServer.DatagramRequestHandler):
+    """
+    Receive logging messages from the jobs and display them on the master.
+    
+    Uses length-prefixed JSON message encoding.
+    """
+    
+    def handle(self):
+        """
+        Handle messages coming in over self.connection.
+        
+        Messages are 4-byte-length-prefixed JSON-encoded logging module records.
+        """
+        
+        while True:
+            # Loop until we run out of messages
+        
+            # Parse the length
+            length_data = self.rfile.read(4)
+            if len(length_data) < 4:
+                # The connection was closed, or we didn't get enough data
+                # TODO: complain?
+                break
+                
+            # Actually parse the length
+            length = struct.unpack(">L", length_data)[0]
+            
+            # This is where we'll put the received message
+            message_parts = []
+            length_received = 0
+            while length_received < length:
+                # Keep trying to get enough data
+                part = self.rfile.read(length - length_received)
+                
+                length_received += len(part)
+                message_parts.append(part)
+                
+            # Stitch it all together
+            message = "".join(message_parts)
+
+            try:
+            
+                # Parse it as JSON
+                message_attrs = json.loads(message)
+                
+                # Fluff it up into a proper logging record
+                record = logging.makeLogRecord(message_attrs)
+            except:
+                logging.error("Malformed record")
+                
+            # TODO: do log level filtering
+            logging.getLogger("remote").handle(record)
+            
+class JSONDatagramHandler(logging.handlers.DatagramHandler):
+    """
+    Send logging records over UDP serialized as JSON.
+    """
+    
+    def makePickle(self, record):
+        """
+        Actually, encode the record as length-prefixed JSON instead.
+        """
+        
+        json_string = json.dumps(record.__dict__)
+        length = struct.pack(">L", len(json_string))
+        
+        return length + json_string
+        
+class RealTimeLogger(object):
+    """
+    All-static class for getting a logger that logs over UDP to the master.
+    """
+    
+    # We keep the master host and port as class data
+    master_host = None
+    master_port = None
+    
+    # Also the logger
+    logger = None
+    
+    # The master keeps a server and thread
+    logging_server = None
+    server_thread = None
+  
+    @classmethod
+    def start_master(cls, options):
+        """
+        Start up the master server and put its details into the options
+        namespace.
+        
+        """
+        
+        logging.basicConfig(level=logging.DEBUG)
+    
+        # Start up the logging server
+        cls.logging_server = SocketServer.ThreadingUDPServer(("0.0.0.0", 0),
+            LoggingDatagramHandler)
+            
+        # Set up a thread to do all the serving in the background and exit when we
+        # do
+        cls.server_thread = threading.Thread(
+            target=cls.logging_server.serve_forever)
+        cls.server_thread.daemon = True
+        cls.server_thread.start()
+        
+        # Set options for logging in the class and the options namespace
+        cls.master_host = socket.getfqdn()
+        options.log_host = cls.master_host
+        cls.master_port = cls.logging_server.server_address[1]
+        options.log_port = cls.master_port
+        
+    @classmethod
+    def stop_master(cls):
+        """
+        Stop the server on the master.
+        
+        """
+        
+        cls.logging_server.shutdown()
+        cls.server_thread.join()
+  
+    @classmethod
+    def set_master(cls, options):
+        """
+        Set the master info.
+        
+        """
+        
+        cls.master_host = options.log_host
+        cls.master_port = options.log_port
+        
+        
+    @classmethod
+    def get(cls):
+        """
+        Get the logger that logs to master.
+        
+        Note that if the master logs here, you will see the message twice,
+        since it still goes to the normal log handlers too.
+        """
+        
+        if cls.logger is None:
+            # Only do the setup once, so we don't add a handler every time we
+            # log
+            cls.logger = logging.getLogger('realtime')
+            cls.logger.setLevel(logging.DEBUG)
+            cls.logger.addHandler(JSONDatagramHandler(cls.master_host,
+                cls.master_port))
+        
+        return cls.logger
+
+    
 def robust_makedirs(directory):
     """
     Make a directory when other nodes may be trying to do the same on a shared
@@ -75,6 +228,8 @@ def run_all_alignments(job, options):
     align and evaluate it.
 
     """
+    
+    RealTimeLogger.set_master(options)
 
     # Make sure we skip the header
     is_first = True
@@ -106,7 +261,7 @@ def run_all_alignments(job, options):
             cores=16, memory="100G", disk="50G")
             
         # Say what we did
-        print("Running child for {}".format(parts[1]))
+        RealTimeLogger.get().info("Running child for {}".format(parts[1]))
         
 
 def run_region_alignments(job, options, region, url):
@@ -115,7 +270,9 @@ def run_region_alignments(job, options, region, url):
     
     """
     
-    print("Running on {} for {}".format(url, region))
+    RealTimeLogger.set_master(options)
+    
+    RealTimeLogger.get().info("Running on {} for {}".format(url, region))
     
     # Get graph basename (last URL component) from URL
     basename = re.match(".*/(.*)/$", url).group(1)
@@ -139,7 +296,8 @@ def run_region_alignments(job, options, region, url):
     
     with open(graph_filename, "w") as output_file:
     
-        print("Downloading {} to {}".format(versioned_url, graph_filename))
+        RealTimeLogger.get().info("Downloading {} to {}".format(versioned_url,
+            graph_filename))
     
         # Hold all the popen objects we need for this
         tasks = []
@@ -168,7 +326,7 @@ def run_region_alignments(job, options, region, url):
                     
     # Now run the indexer.
     # TODO: support both indexing modes
-    print("Indexing {}".format(graph_filename))
+    RealTimeLogger.get().info("Indexing {}".format(graph_filename))
     subprocess.check_call(["vg", "index", "-sk10", graph_filename])
                     
     # Where do we look for samples for this region?
@@ -188,11 +346,11 @@ def run_region_alignments(job, options, region, url):
     for sample in list(os.listdir(region_dir))[:options.sample_limit]:
         # For each sample up to the limit
         
-        print("Queueing alignment of {} to {}".format(sample, region))
+        RealTimeLogger.get().info("Queueing alignment of {} to {}".format(
+            sample, region))
     
         # For each sample, know the FQ name
-        sample_fastq = "{}/{}/{}.bam.fq".format(options.sample_dir, sample,
-            sample)
+        sample_fastq = "{}/{}/{}/{}.bam.fq".format(region_dir, sample, sample)
         
         # And know where we're going to put the output
         alignment_file = "{}/{}.gam".format(alignment_dir, sample)
@@ -212,19 +370,27 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
     
     """
     
+    RealTimeLogger.set_master(options)
+    
     # Open the file stream for writing
     with open(output_file, "w") as alignment_file:
     
         # Start the aligner and have it write to the file
-        process = subprocess.Popen(["vg", "map", "-f", sample_fastq, "-i",
-            "-n3", "-M2", "-k10", graph_file], stdout=alignment_file)
+        
+        # Plan out what to run
+        vg_parts = ["vg", "map", "-f", sample_fastq, "-i", "-n3", "-M2", "-k10",
+            graph_file]
+            
+        RealTimeLogger.get().info("Running VG: {}".format(" ".join(vg_parts)))
+        
+        process = subprocess.Popen(vg_parts, stdout=alignment_file)
             
         if process.wait() != 0:
             # Complain if vg dies
             raise RuntimeError("vg died with error {}".format(
                 process.returncode))
                 
-    print("Aligned {}".format(output_file))
+    RealTimeLogger.get().info("Aligned {}".format(output_file))
            
     # Read the alignments in in JSON-line format
     view = subprocess.Popen(["vg", "view", "-aj", output_file],
@@ -288,7 +454,7 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
                 
     with open(stats_file, "w") as stats_handle:
         # Save the stats as JSON
-        print("Saving JSON stats: {}".format(stats))
+        RealTimeLogger.get().info("Saving JSON stats: {}".format(stats))
         json.dump(stats, stats_handle)      
         
 def main(args):
@@ -304,6 +470,8 @@ def main(args):
     
     options = parse_args(args) # This holds the nicely-parsed options object
     
+    RealTimeLogger.start_master(options)
+    
     # Pre-read the input file so we don't try to send file handles over the
     # network.
     options.server_list = list(options.server_list)
@@ -318,9 +486,10 @@ def main(args):
     if failed_jobs > 0:
         raise Exception("{} jobs failed!".format(failed_jobs))
         
-    print "All jobs completed successfully"
-
-
+    print("All jobs completed successfully")
+    
+    RealTimeLogger.stop_master(options)
+    
 if __name__ == "__main__" :
     sys.exit(main(sys.argv))
         
