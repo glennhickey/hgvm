@@ -312,7 +312,7 @@ def count_indexed_contigs(index_url, retries):
             tasks = []
             
             # Do the download
-            tasks.append(subprocess.Popen(["curl", index_url],
+            tasks.append(subprocess.Popen(["curl", "--silent", index_url],
                 stdout=subprocess.PIPE))
             
             # Pipe through zcat
