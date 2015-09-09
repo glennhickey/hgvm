@@ -51,8 +51,8 @@ def parse_args(args):
         help="fnmatch-style pattern for sample names")
     parser.add_argument("--file_pattern", default="*.cram", 
         help="fnmatch-style pattern for read files in sample directories")
-    parser.add_argument("--index_pattern", default="*.cram.crai", 
-        help="fnmatch-style pattern for index files in sample directories")
+    parser.add_argument("--index_suffix", default=".crai", 
+        help="suffix to add to sample files to get index files")
     parser.add_argument("--min_indexed_contigs", type=int, default=1000,
         help="reject samples with indexes not covering this many contigs")
     parser.add_argument("--sample_limit", type=int, default=100, 
@@ -265,8 +265,11 @@ def explore_path(ftp, path, pattern):
             
             subitem_path = "{}/{}".format(path, subitem)
             
+            print(subitem_path, pattern)
+            
             if fnmatch.fnmatchcase(subitem, pattern):
                 # This is a matching thing!
+                print("Match!")
                 yield subitem_path
                 
             # Recurse on everything, even things that match the pattern, in case
@@ -435,56 +438,67 @@ def downloadAllReads(job, options):
     sample_names = [n for n in ftp.nlst() if fnmatch.fnmatchcase(n,
         options.sample_pattern)]
     
-    # Only take samples that have an index and for which the index covers at
-    # least a threshold number of contigs. This is a heuristic for finding the
-    # samples that are actually aligned to and indexed on the alts.
-    accepted_samples = set()
+    # This holds URLs to data files (BAM/CRAM) with indexes that are on a
+    # sufficient number of contigs, by sample name. We take the first
+    # sufficiently good file for any sample.
+    sample_file_urls = {}
     
-    # Dump the good samples to a file
+    # Dump the good data files for samples
     good_samples = open("{}/good.txt".format(options.out_dir), "w")
     
     # TODO: handle failures during explore_path?
     for sample_name in sample_names:
         # For every sample
-        for index_name in explore_path(ftp, "{}/{}".format(root_path,
-            sample_name), options.index_pattern):
-            # Find its indexes (there ouyght to only be one)
+        
+        print("Try {}".format(sample_name))
+        
+        for data_name in explore_path(ftp, "{}/{}".format(root_path,
+            sample_name), options.file_pattern):
+            # Find its data files (there may be several)
+            
+            # Get the index for each
+            index_name = data_name + options.index_suffix
+            
+            print(index_name)
             
             # Count up the contigs it indexes over
             indexed_contigs = count_indexed_contigs("{}/{}".format(
                 base_url, index_name), options.ftp_retry)
                 
             if indexed_contigs >= options.min_indexed_contigs:
-                # This sample is good enough
-                accepted_samples.add(sample_name)
+                # This file for this sample is good enough
+                sample_file_urls[sample_name] = "{}/{}".format(base_url,
+                    data_name)
+                
                 RealTimeLogger.get().info(
-                    "Sample {} has {} contigs".format(sample_name,
+                    "Sample {} has index of {} contigs".format(sample_name,
                     indexed_contigs))
                 # Add the sample to the file we spit out
                 good_samples.write("{}\n".format(sample_name))
+                
+                # Don't finish exploring the path
+                break
+                
             else:
                 # Complain
                 RealTimeLogger.get().warning(
-                    "Sample {} is on too few contigs ({}). Skipping!".format(
+                    "Sample {} has index on too few contigs ({}). Skipping!".format(
                     sample_name, indexed_contigs))
                 
-        if len(accepted_samples) >= options.sample_limit:
+        if len(sample_file_urls) >= options.sample_limit:
             # We got enough
             break
             
     good_samples.close()
             
-    # Compose URLs for all the sample directories
-    sample_urls = {name: "{}/{}".format(options.sample_ftp_root, name)
-        for name in accepted_samples}
-        
-    RealTimeLogger.get().info("Got {} sample URLs".format(len(sample_urls)))
+    RealTimeLogger.get().info("Got {} sample URLs".format(
+        len(sample_file_urls)))
     
     # Make sure we got as many as we wanted.
-    assert(len(sample_urls) == options.sample_limit)
+    assert(len(sample_file_urls) == options.sample_limit)
     
     for region_name in options.regions:
-        for sample_name, sample_url in sample_urls.iteritems():
+        for sample_name, sample_url in sample_file_urls.iteritems():
         
             # Make sure the sample directory exists
             sample_dir = "{}/{}/{}".format(options.out_dir, region_name,
@@ -515,11 +529,11 @@ def downloadAllReads(job, options):
                 
     RealTimeLogger.get().info("Done making children")
    
-def downloadRegion(job, options, region_name, sample_url, range_list,
+def downloadRegion(job, options, region_name, file_url, range_list,
     bam_filename):
     """
     Download all the ranges given for the given region from the given sample
-    URL, concatenate them, and save them to the given BAM.
+    data file URL, concatenate them, and save them to the given BAM.
     
     """
     
@@ -527,40 +541,27 @@ def downloadRegion(job, options, region_name, sample_url, range_list,
     
     # TODO: implement
     RealTimeLogger.get().info("Supposed to download {} ranges {} to {}".format(
-        sample_url, range_list, bam_filename))
+        file_url, range_list, bam_filename))
         
-    # Connect to the FTP server
-    ftp, root_path = ftp_connect(sample_url)
-        
-    # Find all the actual data files
-    # TODO: Acount for FTP connection dropping?
-    file_paths = list(explore_path(ftp, root_path, options.file_pattern))
-    
-    # Make them into URLs
-    file_urls = [sample_url.replace(root_path, file_path)
-        for file_path in file_paths]
-        
-    RealTimeLogger.get().info("Need URLs: {}".format(file_urls))
-    
-    # For each URL and region combination, we get a promise of a returned file
-    # store file ID. This holds them.
+    # For each region, we get a promise of a returned file store file ID. This
+    # holds them.
     part_promises = []
     
-    for file_url in file_urls:
-        # For every file
-        for range_string in range_list:
-            # For every range we want from it...
-            
-            # Make a file that will live through us and our follow-ons.
-            # TODO: When/if actual global files become a thing, don't do that.
-            file_id = job.fileStore.getEmptyFileStoreID()
-            
-            # Set up a child job to grab it that returns a file store ID for the
-            # BAM file it gets. Right now these are promises, but they get
-            # filled in later.
-            part_promises.append(job.addChildJobFn(downloadRange, options,
-                file_url, range_string, file_id, cores=1, memory="1G",
-                disk="50G").rv())
+    # We just have the one file
+    
+    for range_string in range_list:
+        # For every range we want from it...
+        
+        # Make a file that will live through us and our follow-ons.
+        # TODO: When/if actual global files become a thing, don't do that.
+        file_id = job.fileStore.getEmptyFileStoreID()
+        
+        # Set up a child job to grab it that returns a file store ID for the
+        # BAM file it gets. Right now these are promises, but they get
+        # filled in later.
+        part_promises.append(job.addChildJobFn(downloadRange, options,
+            file_url, range_string, file_id, cores=1, memory="1G",
+            disk="50G").rv())
                 
     # Make a follow-on that concatenates the parts together
     job.addFollowOnJobFn(concatAndSortBams, options, part_promises,
