@@ -423,12 +423,13 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
             score = alignment["score"]
         
             # Calculate the mismatches
-            length = len(alignment.sequence)
+            length = len(alignment["sequence"])
             matches = 0
             for mapping in alignment.get("path", {}).get("mapping", []):
                 for edit in mapping.get("edit", []):
                     if (not edit.has_key("sequence") and 
-                        edit["to_length"] == edit["from_length"]):
+                        edit.get("to_length", None) == edit.get(
+                        "from_length", None)):
                         
                         # We found a perfect match edit. Grab its length
                         matches += edit["from_length"]
