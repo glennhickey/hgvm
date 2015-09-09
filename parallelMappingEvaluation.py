@@ -179,6 +179,11 @@ def run_region_alignments(job, options, region, url):
         graph_name)
     robust_makedirs(alignment_dir)
     
+    # Also for statistics
+    stats_dir = "{}/stats/{}/{}".format(options.out_dir, region,
+        graph_name)
+    robust_makedirs(stats_dir)
+    
     # Split out over each sample
     for sample in list(os.listdir(region_dir))[:options.sample_limit]:
         # For each sample up to the limit
@@ -191,16 +196,20 @@ def run_region_alignments(job, options, region, url):
         
         # And know where we're going to put the output
         alignment_file = "{}/{}.gam".format(alignment_dir, sample)
+        stats_file = "{}/{}.json".format(stats_dir, sample)
     
         # Go and bang that fastq against the correct graph.
         # Its output will go to the right place in the output directory.
         job.addChildJobFn(run_alignment, options, region, graph_filename,
-            sample_fastq, alignment_file, cores=32, memory="240G", disk="100G")
+            sample_fastq, alignment_file, stats_file, cores=32, memory="240G",
+            disk="100G")
    
-def run_alignment(job, options, region, graph_file, sample_fastq, output_file):
+def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
+    stats_file):
     """
-    Align the the given fastq against the given graph and put the results in the
-    given file.
+    Align the the given fastq against the given graph and put the GAM and
+    statistics in the given files.
+    
     """
     
     # Open the file stream for writing
@@ -277,10 +286,10 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file):
                 stats["primary_scores"][score] += 1
                 stats["primary_mismatches"][mismatches] += 1
                 
-    with open("{}.json".format(output_file), "w") as stats_file:
+    with open(stats_file, "w") as stats_handle:
         # Save the stats as JSON
         print("Saving JSON stats: {}".format(stats))
-        json.dump(stats, stats_file)      
+        json.dump(stats, stats_handle)      
         
 def main(args):
     """
