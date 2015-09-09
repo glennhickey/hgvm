@@ -40,7 +40,7 @@ def parse_args(args):
         help="sample input directory with <region>/<sample>/<sample>.bam.fq")
     parser.add_argument("out_dir",
         help="output directory to create and fill with alignments and stats")
-    parser.add_argument("--server_version", default="0.6.g",
+    parser.add_argument("--server_version", default="v0.6.g",
         help="server version to add to URLs")
     parser.add_argument("--sample_limit", type=int, default=1, 
         help="number of samples to use")
@@ -106,7 +106,7 @@ def run_all_alignments(job, options):
             cores=16, memory="100G", disk="50G")
             
         # Say what we did
-        job.logToMaster("Running child for {}".format(parts[1]))
+        print("Running child for {}".format(parts[1]))
         
 
 def run_region_alignments(job, options, region, url):
@@ -115,8 +115,10 @@ def run_region_alignments(job, options, region, url):
     
     """
     
+    print("Running on {} for {}".format(url, region))
+    
     # Get graph basename (last URL component) from URL
-    basename = re.match(url, ".*/(.*)/$").group(1)
+    basename = re.match(".*/(.*)/$", url).group(1)
         
     # Get graph name (without region and its associated dash) from basename
     graph_name = basename.replace("-{}".format(region), "").replace(
@@ -143,7 +145,7 @@ def run_region_alignments(job, options, region, url):
         tasks = []
         
         # Do the download
-        tasks.append(subprocess.Popen(["sg2vg", versioned_url, "-g"],
+        tasks.append(subprocess.Popen(["sg2vg", versioned_url, "-u"],
             stdout=subprocess.PIPE))
         
         # Pipe through zcat
@@ -170,7 +172,7 @@ def run_region_alignments(job, options, region, url):
     subprocess.check_call(["vg", "index", "-sk10", graph_filename])
                     
     # Where do we look for samples for this region?
-    region_dir = "{}/{}".format(options.sample_dir, region.toupper()) 
+    region_dir = "{}/{}".format(options.sample_dir, region.upper()) 
     
     # Work out the directory for the alignments to be dumped in
     alignment_dir = "{}/alignments/{}/{}".format(options.out_dir, region,
