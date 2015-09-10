@@ -8,7 +8,7 @@ BAM files with reads must have been already downloaded.
 """
 
 import argparse, sys, os, os.path, random, subprocess, shutil, itertools, glob
-import doctest, re, json, collections
+import doctest, re, json, collections, time, timeit
 import logging, logging.handlers, SocketServer, struct, socket, threading
 
 from toil.job import Job
@@ -372,6 +372,9 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
     
     RealTimeLogger.set_master(options)
     
+    # How long did the alignment take to run, in seconds?
+    run_time = None
+    
     # Open the file stream for writing
     with open(output_file, "w") as alignment_file:
     
@@ -383,12 +386,19 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
             
         RealTimeLogger.get().info("Running VG: {}".format(" ".join(vg_parts)))
         
+        # Mark when we start the alignment
+        start_time = timeit.default_timer()
         process = subprocess.Popen(vg_parts, stdout=alignment_file)
             
         if process.wait() != 0:
             # Complain if vg dies
             raise RuntimeError("vg died with error {}".format(
                 process.returncode))
+                
+        # Mark when it's done
+        end_time = timeit.default_timer()
+        run_time = end_time - start_time
+        
                 
     RealTimeLogger.get().info("Aligned {}".format(output_file))
            
@@ -397,7 +407,8 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
         stdout=subprocess.PIPE)
        
     # Count up the stats: total reads, total mapped at all, total multimapped,
-    # primary alignment score counts, secondary alignment score counts
+    # primary alignment score counts, secondary alignment score counts, and
+    # aligner run time in seconds.
     
     stats = {
         "total_reads": 0,
@@ -408,6 +419,7 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
         "primary_mismatches": collections.Counter(),
         "secondary_scores": collections.Counter(),
         "secondary_mismatches": collections.Counter(),
+        "run_time": run_time
     }
         
     for line in view.stdout:
@@ -462,7 +474,6 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
                 
     with open(stats_file, "w") as stats_handle:
         # Save the stats as JSON
-        RealTimeLogger.get().info("Saving JSON stats: {}".format(stats))
         json.dump(stats, stats_handle)      
         
 def main(args):
