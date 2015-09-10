@@ -489,7 +489,7 @@ def main(args):
         
     print("All jobs completed successfully")
     
-    RealTimeLogger.stop_master(options)
+    RealTimeLogger.stop_master()
     
 if __name__ == "__main__" :
     sys.exit(main(sys.argv))
