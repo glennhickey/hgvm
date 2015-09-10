@@ -55,7 +55,7 @@ def parse_args(args):
         help="suffix to add to sample files to get index files")
     parser.add_argument("--min_indexed_contigs", type=int, default=1000,
         help="reject samples with indexes not covering this many contigs")
-    parser.add_argument("--sample_limit", type=int, default=100, 
+    parser.add_argument("--sample_limit", type=int, default=float("inf"), 
         help="number of matching samples to download")
     parser.add_argument("--ftp_retry", type=int, default=float("inf"), 
         help="number of times to retry sample downloads")
@@ -260,7 +260,15 @@ def explore_path(ftp, path, pattern):
         # List of everything to recurse into
         to_recurse_on = []
         
-        for subitem in ftp.nlst():
+        try:
+            listing = ftp.nlst()
+        except ftplib.error_proto:
+            # For some reason this built-in function sometimes doesn't work. Try
+            # doing it ourselves.
+            listing = []
+            ftp.retrlines("NLST", lambda line: listing.append(line))
+        
+        for subitem in listing:
             # We don't know if these are files or directories.
             
             subitem_path = "{}/{}".format(path, subitem)
@@ -291,7 +299,6 @@ def explore_path(ftp, path, pattern):
             pass
         else:
             raise e
-          
         
 def count_indexed_contigs(index_url, retries):
     """
@@ -494,8 +501,9 @@ def downloadAllReads(job, options):
     RealTimeLogger.get().info("Got {} sample URLs".format(
         len(sample_file_urls)))
     
-    # Make sure we got as many as we wanted.
-    assert(len(sample_file_urls) == options.sample_limit)
+    if(options.sample_limit < float("inf")):
+        # Make sure we got as many as we wanted.
+        assert(len(sample_file_urls) == options.sample_limit)
     
     for region_name in options.regions:
         for sample_name, sample_url in sample_file_urls.iteritems():
