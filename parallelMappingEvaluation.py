@@ -414,9 +414,6 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
         # Parse the alignment JSON
         alignment = json.loads(line)
         
-        # Count the alignment
-        stats["total_reads"] += 1
-        
         if alignment.has_key("score"):
             # This alignment is aligned.
             # Grab its score
@@ -452,6 +449,16 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
                 stats["total_mapped"] += 1
                 stats["primary_scores"][score] += 1
                 stats["primary_mismatches"][mismatches] += 1
+                
+                # We won't see an unaligned primary alignment for this read, so
+                # count the read
+                stats["total_reads"] += 1
+        
+        elif not alignment.get("is_secondary", False):
+            # We have an unmapped primary "alignment"
+            
+            # Count the read by its primary alignment
+            stats["total_reads"] += 1
                 
     with open(stats_file, "w") as stats_handle:
         # Save the stats as JSON
