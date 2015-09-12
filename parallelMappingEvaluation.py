@@ -45,6 +45,10 @@ def parse_args(args):
         help="server version to add to URLs")
     parser.add_argument("--sample_limit", type=int, default=1, 
         help="number of samples to use")
+    parser.add_argument("--edge_max", type=int, default=0, 
+        help="maximum edges to cross in index")
+    parser.add_argument("--kmer_size", type=int, default=10, 
+        help="size of kmers to use in indexing and mapping")
     
     # The command line arguments start with the program name, which we don't
     # want to treat as an argument for argparse. So we remove it.
@@ -327,7 +331,8 @@ def run_region_alignments(job, options, region, url):
     # Now run the indexer.
     # TODO: support both indexing modes
     RealTimeLogger.get().info("Indexing {}".format(graph_filename))
-    subprocess.check_call(["vg", "index", "-sk10", graph_filename])
+    subprocess.check_call(["vg", "index", "-s", "-k", str(options.kmer_size),
+        "-e", str(options.edge_max), graph_filename])
                     
     # Where do we look for samples for this region?
     region_dir = "{}/{}".format(options.sample_dir, region.upper()) 
@@ -346,8 +351,8 @@ def run_region_alignments(job, options, region, url):
     for sample in list(os.listdir(region_dir))[:options.sample_limit]:
         # For each sample up to the limit
         
-        RealTimeLogger.get().info("Queueing alignment of {} to {}".format(
-            sample, region))
+        RealTimeLogger.get().info("Queueing alignment of {} to {} {}".format(
+            sample, graph_name, region))
     
         # For each sample, know the FQ name
         sample_fastq = "{}/{}/{}.bam.fq".format(region_dir, sample, sample)
@@ -381,8 +386,8 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
         # Start the aligner and have it write to the file
         
         # Plan out what to run
-        vg_parts = ["vg", "map", "-f", sample_fastq, "-i", "-n3", "-M2", "-k10",
-            graph_file]
+        vg_parts = ["vg", "map", "-f", sample_fastq, "-i", "-n3", "-M2", "-k", 
+            str(options.kmer_size), graph_file]
             
         RealTimeLogger.get().info("Running VG: {}".format(" ".join(vg_parts)))
         
