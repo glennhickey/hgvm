@@ -44,5 +44,3 @@ brca2	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/simons-brca2/	vg
 sma	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/simons-sma/	vg	hgvm ref + simons VCFs	glenn.hickey@gmail.com
 lrc_kir	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/simons-lrc_kir/	vg	hgvm ref + simons VCFs	glenn.hickey@gmail.com
 mhc	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/simons-mhc/	vg	hgvm ref + simons VCFs	glenn.hickey@gmail.com
-brca1	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/vg-brca1/	vg	Progressive VG	erik.garrison@gmail.com
-brca2	http://ec2-54-149-188-244.us-west-2.compute.amazonaws.com/vg-brca2/	vg	Progressive VG	erik.garrison@gmail.coms

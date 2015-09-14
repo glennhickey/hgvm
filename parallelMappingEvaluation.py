@@ -167,6 +167,11 @@ class RealTimeLogger(object):
         cls.master_port = cls.logging_server.server_address[1]
         options.log_port = cls.master_port
         
+        # Save them in the environment so they get sent out to jobs
+        os.environ["RT_LOGGING_HOST"] = cls.master_host
+        os.environ["RT_LOGGING_PORT"] = str(cls.master_port)
+        
+        
     @classmethod
     def stop_master(cls):
         """
@@ -184,8 +189,9 @@ class RealTimeLogger(object):
         
         """
         
-        cls.master_host = options.log_host
-        cls.master_port = options.log_port
+        # Read from the environment now instead of the options
+        cls.master_host = os.environ["RT_LOGGING_HOST"]
+        cls.master_port = int(os.environ["RT_LOGGING_PORT"])
         
         
     @classmethod
@@ -262,7 +268,7 @@ def run_all_alignments(job, options):
         
         # We cleverly just split the lines out to different nodes
         job.addChildJobFn(run_region_alignments, options, region, url,
-            cores=16, memory="100G", disk="50G")
+            cores=32, memory="240G", disk="100G")
             
         # Say what we did
         RealTimeLogger.get().info("Running child for {}".format(parts[1]))
@@ -388,6 +394,14 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
         # Plan out what to run
         vg_parts = ["vg", "map", "-f", sample_fastq, "-i", "-n3", "-M2", "-k", 
             str(options.kmer_size), graph_file]
+        
+        RealTimeLogger.get().info(
+            "Alignment job resources: {} cores, {} memory, {} disk".format(
+            job.cores, job.memory, job.disk))
+            
+        # Refuse to run on < 32 cores, so we don't accidentally take < a whole
+        # ku node
+        assert(job.cores >= 32)
             
         RealTimeLogger.get().info("Running VG: {}".format(" ".join(vg_parts)))
         
@@ -419,7 +433,6 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
         "total_reads": 0,
         "total_mapped": 0,
         "total_multimapped": 0,
-        "primary_perfect": 0,
         "primary_scores": collections.Counter(),
         "primary_mismatches": collections.Counter(),
         "secondary_scores": collections.Counter(),
@@ -502,7 +515,7 @@ def main(args):
     
     # Make a root job
     root_job = Job.wrapJobFn(run_all_alignments, options,
-        cores=1, memory="2G", disk=0)
+        cores=32, memory="240G", disk="100G")
     
     # Run it and see how many jobs fail
     failed_jobs = Job.Runner.startToil(root_job,  options)
