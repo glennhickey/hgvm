@@ -36,6 +36,10 @@ def parse_args(args):
                         help="extension to find input grpah index")
     parser.add_argument("--overwrite", action="store_true", default=False,
                         help="overwrite files if dont exist")
+    parser.add_argument("--fa_path", type=str, default="./altRegions",
+                        help="path to search for reference sequences. expects "
+                        "references to be in <fa_path>/BRCA1/ref.fa, etc. "
+                        " [TODO: support different ref versions?]" )
     
     args = args[1:]
         
@@ -60,8 +64,18 @@ def graph_path(alignment_path, options):
 def index_path(graph_path, options):
     """ get index corresponding to a graph
     """
-    name, ext = os.path.splitext(graph_path)
-    return name + options.index_ext
+    return "{}{}".format(graph_path, options.index_ext)
+
+def ref_path(alignment_path, options):
+    """ get the fasta file corresponding to the reference, assuming region
+    name comes after 1st dash in filename
+    """
+    name, ext = os.path.splitext(os.path.basename(alignment_path))
+    region = name.split("-")[1].upper()
+    # NOTE: this logic only supports one reference (ie grchg38), so won't work
+    # for simons data.
+    return os.path.join(options.fa_path, region, "ref.fa")
+
 
 def alignment_read_tag(alignment_path, options):
     """ say alignment is bla/gcsa/real/camel-brca1.gam, then return real
@@ -103,6 +117,20 @@ def augmented_vg_path(alignment_path, options, tag=""):
     """
     name = os.path.splitext(os.path.basename(alignment_path))[0]
     name += "{}_augmented.vg".format(tag)
+    return os.path.join(out_dir(alignment_path, options), name)
+
+def projected_bam_path(alignment_path, options, tag=""):
+    """ get output of surjecting input gam to bam on ref
+    """
+    name = os.path.splitext(os.path.basename(alignment_path))[0]
+    name += "{}_ref.bam".format(tag)
+    return os.path.join(out_dir(alignment_path, options), name)
+
+def linear_vcf_path(alignment_path, options, tag=""):
+    """ get output of samtools (linear) variant calling pipelines
+    """
+    name = os.path.splitext(os.path.basename(alignment_path))[0]
+    name += "{}_linear.vcf".format(tag)
     return os.path.join(out_dir(alignment_path, options), name)
 
 def run_vg_mod_i_hack(graph_path, alignment_path, out_path, options):
@@ -148,8 +176,55 @@ def run(cmd, stdout = sys.stdout, stderr = sys.stderr):
 def compute_linear_variants(job, input_gam, options):
     """ project to bam, then run samtools to call some variants
     """
-    
+    input_graph_path = graph_path(input_gam, options)
+    input_index_path = index_path(input_graph_path, options)
 
+    # can only do this if there is a "ref" path in the vg graph
+    res_path = temp_path(options)
+    run("./vgHasPath.sh {} {} > {}".format(input_graph_path, "ref", res_path))
+    has_ref = False
+    with open(res_path) as res_file:
+        has_ref = res_file.read()[0] == "1"
+    run("rm {}".format(res_path))
+    
+    if has_ref:
+        surject_path = projected_bam_path(input_gam, options)
+        out_vcf_path = linear_vcf_path(input_gam, options)
+        do_surject = options.overwrite or not os.path.isfile(surject_path)
+        do_vcf = do_surject or not os.path.isfile(out_vcf_path)
+
+        if do_surject:
+            prefix_path = temp_path(options, ".prefix")
+            # surject to reference path (name hardcoded to ref for now)
+            run("vg surject -d {} -p {} -b {} | samtools sort -o - {}> {}".format(
+                input_index_path,
+                "ref",
+                input_gam,
+                prefix_path,
+                surject_path))
+            run("rm -f {}".format(prefix_path))
+
+        if do_vcf:
+            # todo: we assume that all graphs have same reference fasta, here.
+            # this is false for, ex, simons which uses grchg37 instead of 38.
+
+            # create pileup in bcf using samtools
+            # http://samtools.sourceforge.net/mpileup.shtml
+            bcf_path = temp_path(options, ".bcf")
+            fasta_path = ref_path(input_gam, options)
+            assert os.path.isfile(fasta_path)
+            run("samtools mpileup -u -t DP -f {} {} | bcftools view -O v - > {}".format(
+                fasta_path,
+                surject_path,
+                bcf_path))
+
+            # convert bcf to vcf (pretty sure not needed)
+            out_vcf_path = linear_vcf_path(input_gam, options)
+            run("bcftools view {} > {}".format(bcf_path, out_vcf_path))
+
+            run("rm -f {}".format(bcf_path))
+            
+    
 def compute_vg_variants(job, input_gam, options):
     """ run vg pileup and vg call on the input
     """
@@ -181,16 +256,19 @@ def compute_vg_variants(job, input_gam, options):
         #run("vg mod {} -i {} > {}".format(input_graph_path,
         #                                  out_call_path,
         #                                  out_augmented_vg_path))
-        run_vg_mod_i_hack(input_graph_path,
-                          out_call_path,
-                          out_augmented_vg_path,
-                          options)
+
+        #run_vg_mod_i_hack(input_graph_path,
+        #                  out_call_path,
+        #                  out_augmented_vg_path,
+        #                  options)
 
 def call_variants(job, options):
     """ run everything (root toil job)
     """
     for input_gam in options.in_gams:
         job.addChildJobFn(compute_vg_variants, input_gam, options,
+                          cores=1)
+        job.addChildJobFn(compute_linear_variants, input_gam, options,
                           cores=1)
     
     
