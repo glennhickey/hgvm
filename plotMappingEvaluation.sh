@@ -29,6 +29,12 @@ STATS_DIR="${INPUT_DIR}/stats"
 PLOTS_DIR="${INPUT_DIR}/plots"
 mkdir -p "${PLOTS_DIR}"
 
+# We need overall files for mapped and multimapped
+OVERALL_MAPPING_FILE="${PLOTS_DIR}/mapping.tsv"
+OVERALL_MAPPING_PLOT="${PLOTS_DIR}/mapping.png"
+OVERALL_MULTIMAPPING_FILE="${PLOTS_DIR}/multimapping.tsv"
+OVERALL_MULTIMAPPING_PLOT="${PLOTS_DIR}/multimapping.png"
+
 for REGION in `ls ${STATS_DIR}`
 do
     # For every region we ran
@@ -38,10 +44,13 @@ do
     MAPPING_PLOT="${PLOTS_DIR}/mapping.${REGION}.png"
     MULTIMAPPING_FILE="${PLOTS_DIR}/multimapping.${REGION}.tsv"
     MULTIMAPPING_PLOT="${PLOTS_DIR}/multimapping.${REGION}.png"
+    RUNTIME_FILE="${PLOTS_DIR}/runtime.${REGION}.tsv"
+    RUNTIME_PLOT="${PLOTS_DIR}/runtime.${REGION}.png"
     
     # Make them empty
     :>"${MAPPING_FILE}"
     :>"${MULTIMAPPING_FILE}"
+    :>"${RUNTIME_FILE}"
     
     
     echo "Plotting ${REGION^^}..."
@@ -69,6 +78,10 @@ do
             printf "${GRAPH_NAME}\t" >> "${MULTIMAPPING_FILE}"
             # We need the 0 + in case there are no sufficiently good mappings
             cat "${JSON_FILE}" | jq -r '1 - ((0 + .secondary_mismatches."0" + .secondary_mismatches."1" + .secondary_mismatches."2") / .total_reads)' >> "${MULTIMAPPING_FILE}"
+            
+            # Next: runtime in seconds
+            printf "${GRAPH_NAME}\t" >> "${RUNTIME_FILE}"
+            cat "${JSON_FILE}" | jq -r '.run_time' >> "${RUNTIME_FILE}"
         done
     done
     
@@ -85,6 +98,32 @@ do
         --x_sideways \
         "${PLOT_PARAMS[@]}" \
         --font_size 20 --dpi 90
+        
+    ./boxplot.py "${RUNTIME_FILE}" \
+        --title "$(printf "Aligner runtime\n in ${REGION^^}")" \
+        --x_label "Graph" --y_label "Runtime per sample (seconds)" --save "${RUNTIME_PLOT}" \
+        --x_sideways \
+        "${PLOT_PARAMS[@]}" \
+        --font_size 20 --dpi 90
     
 done
+
+# Aggregate the overall files
+cat "${PLOTS_DIR}"/mapping.*.tsv > "${OVERALL_MAPPING_FILE}"
+cat "${PLOTS_DIR}"/multimapping.*.tsv > "${OVERALL_MULTIMAPPING_FILE}"
+
+# Make the overall plots
+./boxplot.py "${OVERALL_MAPPING_FILE}" \
+    --title "$(printf "Well-mapped\n(<=2 mismatches)\nreads")" \
+    --x_label "Graph" --y_label "Portion Well-mapped" --save "${OVERALL_MAPPING_PLOT}" \
+    --x_sideways \
+    "${PLOT_PARAMS[@]}" \
+    --font_size 20 --dpi 90
+        
+./boxplot.py "${OVERALL_MULTIMAPPING_FILE}" \
+    --title "$(printf "Not-well-multimapped\n(>2 mismatches or unmultimapped)\nreads")" \
+    --x_label "Graph" --y_label "Portion not-well-multimapped" --save "${OVERALL_MULTIMAPPING_PLOT}" \
+    --x_sideways \
+    "${PLOT_PARAMS[@]}" \
+    --font_size 20 --dpi 90
 
