@@ -159,7 +159,8 @@ class RealTimeLogger(object):
             cls.logger = logging.getLogger('realtime')
             cls.logger.setLevel(logging.DEBUG)
             cls.logger.addHandler(JSONDatagramHandler(
-                os.environ["RT_LOGGING_HOST"], os.environ["RT_LOGGING_PORT"]))
+                os.environ["RT_LOGGING_HOST"],
+                int(os.environ["RT_LOGGING_PORT"])))
         
         return cls.logger
 
@@ -188,11 +189,12 @@ def write_global_directory(file_store, path, cleanup=False):
             # able to extract it later with an arbitrary name.
             
             for file_name in os.listdir(path):
-                # Add each file in the directory to the tar
-                tar.add(file_name)
+                # Add each file in the directory to the tar, with a relative
+                # path
+                tar.add(os.path.join(path, file_name), arcname=file_name)
                 
-    # Spit back the ID to use to retrieve it
-    return directory_id
+        # Spit back the ID to use to retrieve it
+        return file_id
         
 def read_global_directory(file_store, directory_id, path):
     """
