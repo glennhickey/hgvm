@@ -12,6 +12,8 @@ import doctest, re, json, collections, time, timeit
 import logging, logging.handlers, SocketServer, struct, socket, threading
 
 from toil.job import Job
+import toillib
+from toillib import RealTimeLogger
 
 def parse_args(args):
     """
@@ -56,182 +58,7 @@ def parse_args(args):
         
     return parser.parse_args(args)
     
-class LoggingDatagramHandler(SocketServer.DatagramRequestHandler):
-    """
-    Receive logging messages from the jobs and display them on the master.
-    
-    Uses length-prefixed JSON message encoding.
-    """
-    
-    def handle(self):
-        """
-        Handle messages coming in over self.connection.
-        
-        Messages are 4-byte-length-prefixed JSON-encoded logging module records.
-        """
-        
-        while True:
-            # Loop until we run out of messages
-        
-            # Parse the length
-            length_data = self.rfile.read(4)
-            if len(length_data) < 4:
-                # The connection was closed, or we didn't get enough data
-                # TODO: complain?
-                break
-                
-            # Actually parse the length
-            length = struct.unpack(">L", length_data)[0]
-            
-            # This is where we'll put the received message
-            message_parts = []
-            length_received = 0
-            while length_received < length:
-                # Keep trying to get enough data
-                part = self.rfile.read(length - length_received)
-                
-                length_received += len(part)
-                message_parts.append(part)
-                
-            # Stitch it all together
-            message = "".join(message_parts)
 
-            try:
-            
-                # Parse it as JSON
-                message_attrs = json.loads(message)
-                
-                # Fluff it up into a proper logging record
-                record = logging.makeLogRecord(message_attrs)
-            except:
-                logging.error("Malformed record")
-                
-            # TODO: do log level filtering
-            logging.getLogger("remote").handle(record)
-            
-class JSONDatagramHandler(logging.handlers.DatagramHandler):
-    """
-    Send logging records over UDP serialized as JSON.
-    """
-    
-    def makePickle(self, record):
-        """
-        Actually, encode the record as length-prefixed JSON instead.
-        """
-        
-        json_string = json.dumps(record.__dict__)
-        length = struct.pack(">L", len(json_string))
-        
-        return length + json_string
-        
-class RealTimeLogger(object):
-    """
-    All-static class for getting a logger that logs over UDP to the master.
-    """
-    
-    # We keep the master host and port as class data
-    master_host = None
-    master_port = None
-    
-    # Also the logger
-    logger = None
-    
-    # The master keeps a server and thread
-    logging_server = None
-    server_thread = None
-  
-    @classmethod
-    def start_master(cls, options):
-        """
-        Start up the master server and put its details into the options
-        namespace.
-        
-        """
-        
-        logging.basicConfig(level=logging.DEBUG)
-    
-        # Start up the logging server
-        cls.logging_server = SocketServer.ThreadingUDPServer(("0.0.0.0", 0),
-            LoggingDatagramHandler)
-            
-        # Set up a thread to do all the serving in the background and exit when we
-        # do
-        cls.server_thread = threading.Thread(
-            target=cls.logging_server.serve_forever)
-        cls.server_thread.daemon = True
-        cls.server_thread.start()
-        
-        # Set options for logging in the class and the options namespace
-        cls.master_host = socket.getfqdn()
-        options.log_host = cls.master_host
-        cls.master_port = cls.logging_server.server_address[1]
-        options.log_port = cls.master_port
-        
-        # Save them in the environment so they get sent out to jobs
-        os.environ["RT_LOGGING_HOST"] = cls.master_host
-        os.environ["RT_LOGGING_PORT"] = str(cls.master_port)
-        
-        
-    @classmethod
-    def stop_master(cls):
-        """
-        Stop the server on the master.
-        
-        """
-        
-        cls.logging_server.shutdown()
-        cls.server_thread.join()
-  
-    @classmethod
-    def set_master(cls, options):
-        """
-        Set the master info.
-        
-        """
-        
-        # Read from the environment now instead of the options
-        cls.master_host = os.environ["RT_LOGGING_HOST"]
-        cls.master_port = int(os.environ["RT_LOGGING_PORT"])
-        
-        
-    @classmethod
-    def get(cls):
-        """
-        Get the logger that logs to master.
-        
-        Note that if the master logs here, you will see the message twice,
-        since it still goes to the normal log handlers too.
-        """
-        
-        if cls.logger is None:
-            # Only do the setup once, so we don't add a handler every time we
-            # log
-            cls.logger = logging.getLogger('realtime')
-            cls.logger.setLevel(logging.DEBUG)
-            cls.logger.addHandler(JSONDatagramHandler(cls.master_host,
-                cls.master_port))
-        
-        return cls.logger
-
-    
-def robust_makedirs(directory):
-    """
-    Make a directory when other nodes may be trying to do the same on a shared
-    filesystem.
-    
-    """
-
-    if not os.path.exists(directory):
-        try:
-            # Make it if it doesn't exist
-            os.makedirs(directory)
-        except OSError:
-            # If you can't make it, maybe someone else did?
-            pass
-            
-    # Make sure it exists and is a directory
-    assert(os.path.exists(directory) and os.path.isdir(directory))
-    
 def run_all_alignments(job, options):
     """
     For each server listed in the server_list tsv, kick off child jobs to
@@ -239,8 +66,6 @@ def run_all_alignments(job, options):
 
     """
     
-    RealTimeLogger.set_master(options)
-
     # Make sure we skip the header
     is_first = True
     
@@ -280,8 +105,6 @@ def run_region_alignments(job, options, region, url):
     
     """
     
-    RealTimeLogger.set_master(options)
-    
     RealTimeLogger.get().info("Running on {} for {}".format(url, region))
     
     # Get graph basename (last URL component) from URL
@@ -295,11 +118,11 @@ def run_region_alignments(job, options, region, url):
     versioned_url = url + options.server_version
     
     # Work out where the graph goes
-    # it will be <graph_name>.vg in here
-    graph_dir = "{}/graphs/{}".format(options.out_dir, region)
-    robust_makedirs(graph_dir)
+    # it will be graph.vg in here
+    graph_dir = "{}/graph".format(job.fileStore.getLocalTempDir())
+    toillib.robust_makedirs(graph_dir)
     
-    graph_filename = "{}/{}.vg".format(graph_dir, graph_name)
+    graph_filename = "{}/graph.vg".format(graph_dir)
     
     # Download and fix up the graph with this ugly subprocess pipeline
     # sg2vg "${URL}" -u | vg view -Jv - | vg mod -X 100 - | vg ids -s - > "graphs/${BASENAME}.vg"
@@ -339,23 +162,30 @@ def run_region_alignments(job, options, region, url):
     RealTimeLogger.get().info("Indexing {}".format(graph_filename))
     subprocess.check_call(["vg", "index", "-s", "-k", str(options.kmer_size),
         "-e", str(options.edge_max), graph_filename])
+        
+    # Now save the indexed graph directory to the file store. It can be cleaned
+    # up since only our children use it.
+    index_dir_id = toillib.write_global_directory(job.fileStore, graph_dir,
+        cleanup=True)
                     
-    # Where do we look for samples for this region?
-    region_dir = "{}/{}".format(options.sample_dir, region.upper()) 
+    # Where do we look for samples for this region in the input?
+    region_dir = "{}/{}".format(options.sample_dir, region.upper())
     
-    # Work out the directory for the alignments to be dumped in
+    # What samples do we do? List input sample names up to the given limit.
+    input_samples = list(toillib.list_input_directory(
+        region_dir))[:options.sample_limit]
+    
+    # Work out the directory for the alignments to be dumped in in the output
     alignment_dir = "{}/alignments/{}/{}".format(options.out_dir, region,
         graph_name)
-    robust_makedirs(alignment_dir)
     
     # Also for statistics
     stats_dir = "{}/stats/{}/{}".format(options.out_dir, region,
         graph_name)
-    robust_makedirs(stats_dir)
     
-    # Split out over each sample
-    for sample in list(os.listdir(region_dir))[:options.sample_limit]:
-        # For each sample up to the limit
+    
+    for sample in input_samples:
+        # Split out over each sample
         
         RealTimeLogger.get().info("Queueing alignment of {} to {} {}".format(
             sample, graph_name, region))
@@ -364,24 +194,38 @@ def run_region_alignments(job, options, region, url):
         sample_fastq = "{}/{}/{}.bam.fq".format(region_dir, sample, sample)
         
         # And know where we're going to put the output
-        alignment_file = "{}/{}.gam".format(alignment_dir, sample)
-        stats_file = "{}/{}.json".format(stats_dir, sample)
+        alignment_file_key = "{}/{}.gam".format(alignment_dir, sample)
+        stats_file_key = "{}/{}.json".format(stats_dir, sample)
     
-        # Go and bang that fastq against the correct graph.
-        # Its output will go to the right place in the output directory.
-        job.addChildJobFn(run_alignment, options, region, graph_filename,
-            sample_fastq, alignment_file, stats_file, cores=32, memory="240G",
-            disk="100G")
+        # Go and bang that input fastq against the correct indexed graph.
+        # Its output will go to the right place in the output store.
+        job.addChildJobFn(run_alignment, options, region, index_dir_id,
+            sample_fastq, alignment_file_key, stats_file_key, cores=32,
+            memory="240G", disk="100G")
    
-def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
-    stats_file):
+def run_alignment(job, options, region, index_dir_id, sample_fastq_key, 
+    alignment_file_key, stats_file_key):
     """
-    Align the the given fastq against the given graph and put the GAM and
-    statistics in the given files.
+    Align the the given fastq from the input store against the given indexed
+    graph (in the file store as a directory) and put the GAM and statistics in
+    the given output keys in the output store.
     
     """
     
-    RealTimeLogger.set_master(options)
+    # Download the indexed graph to a directory we can use
+    graph_dir = "{}/graph".format(job.fileStore.getLocalTempDir())
+    toillib.read_global_directory(job.fileStore, index_dir_id, graph_dir)
+    
+    # We know what the vg file in there will be named
+    graph_file = "{}/graph.vg".format(graph_dir)
+    
+    # Also we need the sample fastq
+    fastq_file = "{}/input.fq".format(job.fileStore.getLocalTempDir())
+    toillib.read_input_file(sample_fastq_key, fastq_file)
+    
+    # And temp files for our aligner output and stats
+    output_file = "{}/output.gam".format(job.fileStore.getLocalTempDir())
+    stats_file = "{}/stats.json".format(job.fileStore.getLocalTempDir())
     
     # How long did the alignment take to run, in seconds?
     run_time = None
@@ -392,17 +236,9 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
         # Start the aligner and have it write to the file
         
         # Plan out what to run
-        vg_parts = ["vg", "map", "-f", sample_fastq, "-i", "-n3", "-M2", "-k", 
+        vg_parts = ["vg", "map", "-f", fastq_file, "-i", "-n3", "-M2", "-k", 
             str(options.kmer_size), graph_file]
         
-        RealTimeLogger.get().info(
-            "Alignment job resources: {} cores, {} memory, {} disk".format(
-            job.cores, job.memory, job.disk))
-            
-        # Refuse to run on < 32 cores, so we don't accidentally take < a whole
-        # ku node
-        assert(job.cores >= 32)
-            
         RealTimeLogger.get().info("Running VG: {}".format(" ".join(vg_parts)))
         
         # Mark when we start the alignment
@@ -492,7 +328,13 @@ def run_alignment(job, options, region, graph_file, sample_fastq, output_file,
                 
     with open(stats_file, "w") as stats_handle:
         # Save the stats as JSON
-        json.dump(stats, stats_handle)      
+        json.dump(stats, stats_handle)
+        
+    # Now send the output files (alignment and stats) to the output store where
+    # they belong.
+    toillib.write_output_file(output_file, alignment_file_key)
+    toillib.write_output_file(stats_file, stats_file_key)
+    
         
 def main(args):
     """
@@ -507,7 +349,7 @@ def main(args):
     
     options = parse_args(args) # This holds the nicely-parsed options object
     
-    RealTimeLogger.start_master(options)
+    toillib.RealTimeLogger.start_master()
     
     # Pre-read the input file so we don't try to send file handles over the
     # network.
@@ -525,7 +367,7 @@ def main(args):
         
     print("All jobs completed successfully")
     
-    RealTimeLogger.stop_master()
+    toillib.RealTimeLogger.stop_master()
     
 if __name__ == "__main__" :
     sys.exit(main(sys.argv))
