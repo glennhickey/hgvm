@@ -131,36 +131,7 @@ def linear_vcf_path(alignment_path, options, tag=""):
     """
     name = os.path.splitext(os.path.basename(alignment_path))[0]
     name += "{}_linear.vcf".format(tag)
-    return os.path.join(out_dir(alignment_path, options), name)
-
-def run_vg_mod_i_hack(graph_path, alignment_path, out_path, options):
-    """ vg mod -i seems to crash all the time.  try to work around
-    by splitting into one mod job for each gam line
-    """
-    json_alignment_path = temp_path(options, ext=".json")
-    single_alignment_path = temp_path(options, ext=".gam")
-    mod_path1 = temp_path(options, ext=".vg")
-    mod_path2 = temp_path(options, ext=".vg")
-
-    run("vg view {} -a -j > {}".format(alignment_path, json_alignment_path))
-    
-    in_path = graph_path
-    with open(json_alignment_path) as json_alignment_file:
-        for line in json_alignment_file:
-            run("echo \"{}\" | vg view - -a -J -G > {}".format(
-                line.replace("\"", "\\\""),
-                single_alignment_path))
-            run("vg mod {} -i {} > {}".format(in_path,
-                                              single_alignment_path,
-                                              mod_path2))
-            run("mv {} {}".format(mod_path2, mod_path1))
-            in_path = mod_path1
-                
-    run("rm -f {} {} {} {}".format(json_alignment_path,
-                                   mod_path1,
-                                   mod_path2,
-                                   single_alignment_path))
-    
+    return os.path.join(out_dir(alignment_path, options), name)    
 
 def run(cmd, stdout = sys.stdout, stderr = sys.stderr):
     """ run command in shell and barf if it doesn't work
@@ -253,14 +224,9 @@ def compute_vg_variants(job, input_gam, options):
 
     if do_aug:
         robust_makedirs(os.path.dirname(out_augmented_vg_path))
-        #run("vg mod {} -i {} > {}".format(input_graph_path,
-        #                                  out_call_path,
-        #                                  out_augmented_vg_path))
-
-        #run_vg_mod_i_hack(input_graph_path,
-        #                  out_call_path,
-        #                  out_augmented_vg_path,
-        #                  options)
+        run("vg mod {} -i {} > {}".format(input_graph_path,
+                                          out_call_path,
+                                          out_augmented_vg_path))
 
 def call_variants(job, options):
     """ run everything (root toil job)
