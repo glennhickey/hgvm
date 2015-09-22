@@ -131,6 +131,13 @@ def linear_vcf_path(alignment_path, options, tag=""):
     """
     name = os.path.splitext(os.path.basename(alignment_path))[0]
     name += "{}_linear.vcf".format(tag)
+    return os.path.join(out_dir(alignment_path, options), name)
+
+def linear_vg_path(alignment_path, options, tag=""):
+    """ get output of vg conversion from linear vcf
+    """
+    name = os.path.splitext(os.path.basename(alignment_path))[0]
+    name += "{}_linear.vg".format(tag)
     return os.path.join(out_dir(alignment_path, options), name)    
 
 def run(cmd, stdout = sys.stdout, stderr = sys.stderr):
@@ -161,8 +168,11 @@ def compute_linear_variants(job, input_gam, options):
     if has_ref:
         surject_path = projected_bam_path(input_gam, options)
         out_vcf_path = linear_vcf_path(input_gam, options)
+        out_vg_path = linear_vg_path(input_gam, options)
+        fasta_path = ref_path(input_gam, options)
         do_surject = options.overwrite or not os.path.isfile(surject_path)
         do_vcf = do_surject or not os.path.isfile(out_vcf_path)
+        do_vg = do_vcf or not os.path.isfile(out_vg_path)
 
         if do_surject:
             prefix_path = temp_path(options, ".prefix")
@@ -181,19 +191,21 @@ def compute_linear_variants(job, input_gam, options):
 
             # create pileup in bcf using samtools
             # http://samtools.sourceforge.net/mpileup.shtml
-            bcf_path = temp_path(options, ".bcf")
-            fasta_path = ref_path(input_gam, options)
             assert os.path.isfile(fasta_path)
-            run("samtools mpileup -u -t DP -f {} {} | bcftools view -O v - > {}".format(
-                fasta_path,
+            #todo: specifying fasta causing crash on some data.  maybe mismatch?
+            #run("samtools mpileup -u -t DP -f {} {} | bcftools view -O v - > {}".format(
+            #    fasta_path,
+            run("samtools mpileup -u -v -t DP {} > {}".format(
                 surject_path,
-                bcf_path))
+                out_vcf_path))
 
-            # convert bcf to vcf (pretty sure not needed)
-            out_vcf_path = linear_vcf_path(input_gam, options)
-            run("bcftools view {} > {}".format(bcf_path, out_vcf_path))
+            # make compressed index
+            run("bgzip {}".format(out_vcf_path))
+            run("tabix -p vcf {}.gz".format(out_vcf_path))
 
-            run("rm -f {}".format(bcf_path))
+        if do_vg:
+            # and convert back to vg...
+            run("vg construct -v {}.gz -r {} > {}".format(out_vcf_path, fasta_path, out_vg_path))
             
     
 def compute_vg_variants(job, input_gam, options):
