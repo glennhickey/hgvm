@@ -8,6 +8,17 @@ deposit to file/S3/Azure
 import sys, os, os.path, json, collections, logging, logging.handlers
 import SocketServer, struct, socket, threading, tarfile, shutil
 
+# We need some stuff in order to have Azure
+try:
+    import azure
+    import azure.storage.blob
+    import toil.jobStores.azureJobStore
+    have_azure = True
+except ImportError:
+    have_azure = False
+    pass
+    
+
 def robust_makedirs(directory):
     """
     Make a directory when other nodes may be trying to do the same on a shared
@@ -220,45 +231,352 @@ def read_global_directory(file_store, directory_id, path):
             # We need to extract the whole thing into that new directory
             tar.extractall(path)
             
-def read_input_file(input_path, local_path):
+
+class IOStore(object):
     """
-    Read an input file from wherever the input comes from and send it to the
-    given path.
+    A class that lets you get your input files and save your output files
+    to/from a local filesystem, Amazon S3, or Microsoft Azure storage
+    transparently.
     
-    """
-    
-    # For now this is local filesystem. Just make a symlink
-    os.symlink(os.path.abspath(input_path), local_path)
-    
-def list_input_directory(input_path):
-    """
-    Yields each of the subdirectories and files in the given input path, non-
-    recursively.
-    
-    Gives bare file/directory names with no paths.
+    This is the abstract base class; other classes inherit from this and fill in
+    the methods.
     
     """
     
-    # Just use local files for now
+    def __init__(self):
+        """
+        Make a new IOStore
+        """
+        
+        raise NotImplementedError()
+            
+    def read_input_file(self, input_path, local_path):
+        """
+        Read an input file from wherever the input comes from and send it to the
+        given path.
+        
+        """
+        
+        raise NotImplementedError()
+        
+    def list_input_directory(self, input_path):
+        """
+        Yields each of the subdirectories and files in the given input path, non-
+        recursively.
+        
+        Gives bare file/directory names with no paths.
+        
+        """
+        
+        raise NotImplementedError()
     
-    for item in os.listdir(input_path):
-        yield item
-    
-def write_output_file(local_path, output_path):
+    def write_output_file(self, local_path, output_path):
+        """
+        Save the given local file to the given output path. No output directory
+        needs to exist already.
+        
+        """
+        
+        raise NotImplementedError()
+        
+    @staticmethod
+    def get(store_string):
+        """
+        Get a concrete IOStore created from the given connection string.
+        
+        Valid formats are just like for a Toil JobStore, except with container
+        names being specified on Azure.
+        
+        Formats:
+        
+        /absolute/filesystem/path
+        
+        ./relative/filesystem/path
+        
+        file:filesystem/path
+        
+        aws:region:bucket (TODO)
+        
+        aws:region:bucket/path/prefix (TODO)
+        
+        azure:account:container (instead of a container prefix) (gets keys like
+        Toil)
+        
+        azure:account:container/path/prefix (trailing slash added automatically)
+        
+        """
+        
+        # Code adapted from toil's common.py loadJobStore()
+        
+        if store_string[0] in "/.":
+            # Prepend file: tot he path
+            store_string = "file:" + store_string
+
+        try:
+            # Break off the first colon-separated piece.
+            store_type, store_arguments = store_string.split(":", 1)
+        except ValueError:
+            # They probably forgot the . or /
+            raise RuntimeError("Incorrect IO store specification {}. "
+                "Local paths must start with . or /".format(store_string))
+
+        if store_type == "file":
+            return FileIOStore(store_arguments)
+        elif store_type == "aws":
+            # Break out the AWS arguments
+            region, name_prefix = store_arguments.split(":", 1)
+            raise NotImplementedError("AWS IO store not written")
+        elif store_type == "azure":
+            # Break out the Azure arguments. TODO: prefix in the container.
+            account, container = store_arguments.split(":", 1)
+            
+            if "/" in container:
+                # Split the container from the path
+                container, path_prefix = container.split("/", 1)
+            else:
+                # No path prefix
+                path_prefix = ""
+            
+            return AzureIOStore(account, container, path_prefix)
+        else:
+            raise RuntimeError("Unknown IOStore implementation {}".format(
+                store_type))
+        
+        
+            
+class FileIOStore(IOStore):
     """
-    Save the given local file to the given output path. No output directory
-    needs to exist already.
+    A class that lets you get input from and send output to filesystem files.
     
     """
     
+    def __init__(self, path_prefix=""):
+        """
+        Make a new FileIOStore that just treats everything as local paths,
+        relative to the given prefix.
+        
+        """
+        
+        self.path_prefix = path_prefix
+        
+    def read_input_file(self, input_path, local_path):
+        """
+        Get input from the filesystem.
+        """
+        
+        RealTimeLogger.get().info("Loading {} from FileIOStore in {}".format(
+            input_path, self.path_prefix))
+        
+        # Make a symlink to grab things
+        os.symlink(os.path.abspath(os.path.join(self.path_prefix, input_path)),
+            local_path)
+        
+    def list_input_directory(self, input_path):
+        """
+        Loop over directories on the filesystem.
+        """
+        
+        RealTimeLogger.get().info("Enumerating {} from "
+            "FileIOStore in {}".format(input_path, self.path_prefix))
+        
+        for item in os.listdir(os.path.join(self.path_prefix, input_path)):
+            yield item
     
-    parent_dir = os.path.split(output_path)[0]
-    if parent_dir != "":
-        # Make sure the directory it goes in exists.
-        robust_makedirs(parent_dir)
+    def write_output_file(self, local_path, output_path):
+        """
+        Write output to the filesystem
+        """
+
+        RealTimeLogger.get().info("Saving {} to FileIOStore in {}".format(
+            output_path, self.path_prefix))
+
+        # What's the real outptu path to write to?
+        real_output_path = os.path.join(self.path_prefix, output_path)
+
+        # What directory should this go in?
+        parent_dir = os.path.split(real_output_path)[0]
+            
+        if parent_dir != "":
+            # Make sure the directory it goes in exists.
+            robust_makedirs(parent_dir)
+        
+        # These are small so we just make copies
+        shutil.copy2(local_path, real_output_path)
+            
+class AzureIOStore(IOStore):
+    """
+    A class that lets you get input from and send output to Azure Storage.
     
-    # These are small so we just make copies
-    shutil.copy2(local_path, output_path)
+    """
+    
+    def __init__(self, account_name, container_name, name_prefix=""):
+        """
+        Make a new AzureIOStore that reads from and writes to the given
+        container in the given account, adding the given prefix to keys. All
+        paths will be interpreted as keys or key prefixes.
+        
+        If the name prefix does not end with a trailing slash, and is not empty,
+        one will be added automatically.
+        
+        Account keys are retrieved from the AZURE_ACCOUNT_KEY environment
+        variable or from the ~/.toilAzureCredentials file, as in Toil itself.
+        
+        """
+        
+        # Make sure azure libraries actually loaded
+        assert(have_azure)
+        
+        self.account_name = account_name
+        self.container_name = container_name
+        self.name_prefix = name_prefix
+        
+        if self.name_prefix != "" and not self.name_prefix.endswith("/"):
+            # Make sure it has the trailing slash required.
+            self.name_prefix += "/"
+        
+        # Sneak into Toil and use the same keys it uses
+        self.account_key = toil.jobStores.azureJobStore._fetchAzureAccountKey(
+            self.account_name)
+            
+        # This will hold out Azure blob store connection
+        self.connection = None
+        
+    def __getstate__(self):
+        """
+        Return the state to use for pickling. We don't want to try and pickle
+        an open Azure connection.
+        """
+     
+        return (self.account_name, self.account_key, self.container_name, 
+            self.name_prefix)
+        
+    def __setstate__(self, state):
+        """
+        Set up after unpickling.
+        """
+        
+        self.account_name = state[0]
+        self.account_key = state[1]
+        self.container_name = state[2]
+        self.name_prefix = state[3]
+        
+        self.connection = None
+        
+    def __connect(self):
+        """
+        Make sure we have an Azure connection, and set one up if we don't.
+        """
+        
+        if self.connection is None:
+            RealTimeLogger.get().info("Connecting to account {}, using "
+                "container {} and prefix {}".format(self.account_name,
+                self.container_name, self.name_prefix))
+        
+            # Connect to the blob service where we keep everything
+            self.connection = azure.storage.blob.BlobService(
+                account_name=self.account_name, account_key=self.account_key)
+            
+            
+    def read_input_file(self, input_path, local_path):
+        """
+        Get input from Azure.
+        """
+        
+        self.__connect()
+        
+        
+        RealTimeLogger.get().info("Loading {} from AzureIOStore".format(
+            input_path))
+        
+        # Download the blob. This is known to be synchronous, although it can
+        # call a callback during the process.
+        self.connection.get_blob_to_path(self.container_name,
+            self.name_prefix + input_path, local_path)
+            
+    def list_input_directory(self, input_path):
+        """
+        Loop over fake /-delimited directories on Azure. The prefix may or may
+        not not have a trailing slash; if not, one will be added automatically.
+        
+        Returns the names of files and fake directories in the given input fake
+        directory, non-recursively.
+        
+        """
+        
+        self.__connect()
+        
+        RealTimeLogger.get().info("Enumerating {} from AzureIOStore".format(
+            input_path))
+        
+        # Work out what the directory name to list is
+        fake_directory = self.name_prefix + input_path
+        
+        if fake_directory != "" and not fake_directory.endswith("/"):
+            # We have a nonempty prefix, and we need to end it with a slash
+            fake_directory += "/"
+        
+        # This will hold the marker that we need to send back to get the next
+        # page, if there is one. See <http://stackoverflow.com/a/24303682>
+        marker = None
+        
+        # This holds the subdirectories we found; we yield each exactly once.
+        subdirectories = set()
+        
+        while True:
+        
+            # Get the results from Azure. We skip the delimiter since it doesn't
+            # seem to have the placeholder entries it's suppsoed to.
+            result = self.connection.list_blobs(self.container_name, 
+                prefix=fake_directory, marker=marker)
+                
+            for blob in result:
+                # Yield each result's blob name, but directory names only once
+                
+                # Drop the common prefix
+                relative_path = blob.name[len(fake_directory):]
+                
+                if "/" in relative_path:
+                    # We found a file in a subdirectory
+                    subdirectory, _ = relative_path.split("/", 1)
+                    
+                    if subdirectory not in subdirectories:
+                        # It's a new subdirectory. Yield and remember it
+                        subdirectories.add(subdirectory)
+                        
+                        yield subdirectory
+                else:
+                    # We found an actual file  
+                    yield relative_path
+                
+            # Save the marker
+            marker = result.next_marker
+                
+            if not marker:
+                break 
+    
+    def write_output_file(self, local_path, output_path):
+        """
+        Write output to Azure. Will create the container if necessary.
+        """
+        
+        self.__connect()
+        
+        RealTimeLogger.get().info("Saving {} to AzureIOStore".format(
+            output_path))
+        
+        try:
+            # Make the container
+            self.connection.create_container(self.container_name)
+        except azure.WindowsAzureConflictError:
+            # The container probably already exists
+            pass
+        
+        # Upload the blob (synchronously)
+        # TODO: catch no container error here, make the container, and retry
+        self.connection.put_block_blob_from_path(self.container_name,
+            self.name_prefix + output_path, local_path)
+
+        
     
 
 

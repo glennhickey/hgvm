@@ -39,10 +39,10 @@ def parse_args(args):
     # General options
     parser.add_argument("server_list", type=argparse.FileType("r"),
         help="TSV file continaing <region>\t<url> lines for servers to test")
-    parser.add_argument("sample_dir",
-        help="sample input directory with <region>/<sample>/<sample>.bam.fq")
-    parser.add_argument("out_dir",
-        help="output directory to create and fill with alignments and stats")
+    parser.add_argument("sample_store", type=toillib.IOStore.get,
+        help="sample input IOStore with <region>/<sample>/<sample>.bam.fq")
+    parser.add_argument("out_store", type=toillib.IOStore.get,
+        help="output IOStore to create and fill with alignments and stats")
     parser.add_argument("--server_version", default="v0.6.g",
         help="server version to add to URLs")
     parser.add_argument("--sample_limit", type=int, default=1, 
@@ -169,19 +169,17 @@ def run_region_alignments(job, options, region, url):
         cleanup=True)
                     
     # Where do we look for samples for this region in the input?
-    region_dir = "{}/{}".format(options.sample_dir, region.upper())
+    region_dir = region.upper()
     
     # What samples do we do? List input sample names up to the given limit.
-    input_samples = list(toillib.list_input_directory(
+    input_samples = list(options.sample_store.list_input_directory(
         region_dir))[:options.sample_limit]
     
     # Work out the directory for the alignments to be dumped in in the output
-    alignment_dir = "{}/alignments/{}/{}".format(options.out_dir, region,
-        graph_name)
+    alignment_dir = "alignments/{}/{}".format(region, graph_name)
     
     # Also for statistics
-    stats_dir = "{}/stats/{}/{}".format(options.out_dir, region,
-        graph_name)
+    stats_dir = "stats/{}/{}".format(region, graph_name)
     
     
     for sample in input_samples:
@@ -221,7 +219,7 @@ def run_alignment(job, options, region, index_dir_id, sample_fastq_key,
     
     # Also we need the sample fastq
     fastq_file = "{}/input.fq".format(job.fileStore.getLocalTempDir())
-    toillib.read_input_file(sample_fastq_key, fastq_file)
+    options.sample_store.read_input_file(sample_fastq_key, fastq_file)
     
     # And temp files for our aligner output and stats
     output_file = "{}/output.gam".format(job.fileStore.getLocalTempDir())
@@ -332,8 +330,8 @@ def run_alignment(job, options, region, index_dir_id, sample_fastq_key,
         
     # Now send the output files (alignment and stats) to the output store where
     # they belong.
-    toillib.write_output_file(output_file, alignment_file_key)
-    toillib.write_output_file(stats_file, stats_file_key)
+    options.out_store.write_output_file(output_file, alignment_file_key)
+    options.out_store.write_output_file(stats_file, stats_file_key)
     
         
 def main(args):
@@ -349,7 +347,7 @@ def main(args):
     
     options = parse_args(args) # This holds the nicely-parsed options object
     
-    toillib.RealTimeLogger.start_master()
+    RealTimeLogger.start_master()
     
     # Pre-read the input file so we don't try to send file handles over the
     # network.
@@ -367,7 +365,7 @@ def main(args):
         
     print("All jobs completed successfully")
     
-    toillib.RealTimeLogger.stop_master()
+    RealTimeLogger.stop_master()
     
 if __name__ == "__main__" :
     sys.exit(main(sys.argv))
