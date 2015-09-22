@@ -171,7 +171,7 @@ def compute_linear_variants(job, input_gam, options):
         out_vg_path = linear_vg_path(input_gam, options)
         fasta_path = ref_path(input_gam, options)
         do_surject = options.overwrite or not os.path.isfile(surject_path)
-        do_vcf = do_surject or not os.path.isfile(out_vcf_path)
+        do_vcf = do_surject or not os.path.isfile(out_vcf_path + ".gz")
         do_vg = do_vcf or not os.path.isfile(out_vg_path)
 
         if do_surject:
