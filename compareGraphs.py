@@ -46,8 +46,8 @@ def comparison_path(baseline, graph, options):
     """
     bname = os.path.splitext(os.path.basename(baseline))[0]
     gname = os.path.splitext(os.path.basename(graph))[0]
-    read_tag = alignment_read_tag(graph)
-    map_tag = alignment_map_tag(graph)
+    read_tag = alignment_read_tag(graph, options)
+    map_tag = alignment_map_tag(graph, options)
 
     tempdir = os.path.join(options.out_dir, "temp")
     
@@ -65,7 +65,7 @@ def compute_kmer_index(job, graph, options):
     if do_index:
         os.system("vg index -k {} {}".format(options.kmer, graph))
 
-def compute_comparison(job, baseline, graph, out_path, options):
+def compute_comparison(job, baseline, graph, options):
     """ run vg compare between two graphs
     """
     graph_index_path = index_path(graph, options)
@@ -73,6 +73,7 @@ def compute_comparison(job, baseline, graph, out_path, options):
     baseline_index_path = index_path(baseline, options)
     assert os.path.exists(baseline_index_path)
 
+    out_path = comparison_path(baseline, graph, options)
     do_comp = options.overwrite or not os.path.exists(out_path)
     
     if do_comp:        
@@ -83,18 +84,28 @@ def summarize_comparisons(job, options):
     """ make the table by scraping together all the comparison
     json files
     """
-    pass
+    table = "#graph\tmissing\tfound\textra\n"
+    for graph in options.graphs:
+        comp_path = comparison_path(options.baseline, graph, options)
+        with open(comp_path) as f:
+            j = json.loads(f.read())
+            base_only = j["db1_only"]
+            graph_only = j["db2_only"]
+            both = j["intersection"]
+            table += "{}\t{}\t{}\t{}\n".format(os.path.splitext(os.path.basename(graph))[0],
+                                               base_only, both, graph_only)
+    with open(options.out_tsv, "w") as ofile:
+        ofile.write(table)
 
 def compute_all_comparisons(job, options):
     """ run vg compare in parallel on all the graphs,
     outputting a json file for each
     """
     for graph in options.graphs:
-        
         job.addChildJobFn(compute_comparison, options.baseline, graph,
-                          out_path, options)
+                          options)
 
-    job.addFollowOnJobFn(summarize_comparisons, optoins)
+    job.addFollowOnJobFn(summarize_comparisons, options)
                 
 def compute_all_indexes(job, options):
     """ run everything (root toil job)
@@ -104,22 +115,13 @@ def compute_all_indexes(job, options):
     """
 
     # do all the indexes
-    job.addChildJobFn(compute_index, options.baseline, options, cores=1)
+    job.addChildJobFn(compute_kmer_index, options.baseline, options, cores=1)
     for graph in options.graphs:
-        job.addChildJobFn(compute_index, graph, options)
+        job.addChildJobFn(compute_kmer_index, graph, options)
 
     # do the comparisons
     job.addFollowOnJobFn(compute_all_comparisons, options)
 
-def compute_all_comparisons(job, options):
-    """ run everything (root toil job)
-    """
-    for input_gam in options.in_gams:
-        job.addChildJobFn(compute_vg_variants, input_gam, options,
-                          cores=1)
-        job.addChildJobFn(compute_linear_variants, input_gam, options,
-                          cores=1)
-    
     
 def main(args):
     
@@ -127,13 +129,13 @@ def main(args):
     
     RealTimeLogger.start_master(options)
 
-    for gam in options.in_gams:
-        if len(gam.split("/")) < 3 or os.path.splitext(gam)[1] != ".gam":
+    for graph in options.graphs:
+        if len(graph.split("/")) < 3 or os.path.splitext(graph)[1] != ".vg":
             raise RuntimeError("Input gam paths must be of the form "
-                               ".../<alg>/<reads>/<filename>.gam")
+                               ".../<alg>/<reads>/<filename>.vg")
 
     # Make a root job
-    root_job = Job.wrapJobFn(call_variants, options,
+    root_job = Job.wrapJobFn(compute_all_indexes, options,
         cores=1, memory="2G", disk=0)
     
     # Run it and see how many jobs fail
