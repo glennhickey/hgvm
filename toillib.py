@@ -3,6 +3,8 @@ toillib.py: useful extras for Toil scripts.
 
 Includes real-time-logging, input retrieval from file/S3/Azure, and output
 deposit to file/S3/Azure
+
+The only problem is you can't use it since it won't be installed on your nodes
 """
 
 import sys, os, os.path, json, collections, logging, logging.handlers
