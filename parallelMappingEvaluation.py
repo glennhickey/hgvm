@@ -51,6 +51,13 @@ def parse_args(args):
         help="maximum edges to cross in index")
     parser.add_argument("--kmer_size", type=int, default=10, 
         help="size of kmers to use in indexing and mapping")
+    parser.add_argument("--bin_url",
+        default="https://hgwdev.sdsc.edu/~anovak/bin",
+        help="URL to download sg2vg and vg binaries from, without Docker")
+    parser.add_argument("--ca_cert_url",
+        default="https://www.incommon.org/certificates/repository/"
+        "sha384%20Intermediate%20cert.txt",
+        help="CA PEM certificate to download and use to get the binaries")
     
     # The command line arguments start with the program name, which we don't
     # want to treat as an argument for argparse. So we remove it.
@@ -65,6 +72,39 @@ def run_all_alignments(job, options):
     align and evaluate it.
 
     """
+    
+    # Get the CA file needed to verify the binary downloads
+    # The certificate has to come from somewhere trusted by system wget.
+    RealTimeLogger.get().info("Retrieving CA certificate {}".format(
+        options.ca_cert_url))
+    ca_file = "{}/cert.pem".format(job.fileStore.getLocalTempDir())
+    subprocess.check_call(["wget", options.ca_cert_url,
+        "-O", ca_file])
+    
+    # Fix up any \r line endings
+    RealTimeLogger.get().info("Rewriting certificate")
+    subprocess.check_call(["tr", "\\r", "\\n"], stdin=open(ca_file, "r"),
+        stdout=open(ca_file + ".fixed", "w"))
+    os.rename(ca_file + ".fixed", ca_file)
+    
+    
+    # Retrieve binaries we need, using the certificate
+    RealTimeLogger.get().info("Retrieving binaries from {}".format(
+        options.bin_url))
+    bin_dir = "{}/bin".format(job.fileStore.getLocalTempDir())
+    toillib.robust_makedirs(bin_dir)
+    subprocess.check_call(["wget", "{}/sg2vg".format(options.bin_url),
+        "--ca-certificate", ca_file, "-O", "{}/sg2vg".format(bin_dir)])
+    subprocess.check_call(["wget", "{}/vg".format(options.bin_url),
+        "--ca-certificate", ca_file, "-O", "{}/vg".format(bin_dir)])
+        
+    # Make them executable
+    os.chmod("{}/sg2vg".format(bin_dir), 0o744)
+    os.chmod("{}/vg".format(bin_dir), 0o744)
+    
+    # Upload the bin directory to the file store
+    bin_dir_id = toillib.write_global_directory(job.fileStore, bin_dir,
+        cleanup=True)
     
     # Make sure we skip the header
     is_first = True
@@ -92,20 +132,25 @@ def run_all_alignments(job, options):
         region, url, generator = parts[0:3]
         
         # We cleverly just split the lines out to different nodes
-        job.addChildJobFn(run_region_alignments, options, region, url,
-            cores=32, memory="240G", disk="100G")
+        job.addChildJobFn(run_region_alignments, options, bin_dir_id, region,
+            url, cores=32, memory="240G", disk="100G")
             
         # Say what we did
         RealTimeLogger.get().info("Running child for {}".format(parts[1]))
         
 
-def run_region_alignments(job, options, region, url):
+def run_region_alignments(job, options, bin_dir_id, region, url):
     """
     For the given region, download, index, and then align to the given graph.
     
     """
     
     RealTimeLogger.get().info("Running on {} for {}".format(url, region))
+    
+    # Download the binaries
+    bin_dir = "{}/bin".format(job.fileStore.getLocalTempDir())
+    toillib.read_global_directory(job.fileStore, bin_dir_id, bin_dir)
+    
     
     # Get graph basename (last URL component) from URL
     basename = re.match(".*/(.*)/$", url).group(1)
@@ -136,20 +181,20 @@ def run_region_alignments(job, options, region, url):
         tasks = []
         
         # Do the download
-        tasks.append(subprocess.Popen(["sg2vg", versioned_url, "-u"],
-            stdout=subprocess.PIPE))
+        tasks.append(subprocess.Popen(["{}/sg2vg".format(bin_dir),
+            versioned_url, "-u"], stdout=subprocess.PIPE))
         
         # Pipe through zcat
-        tasks.append(subprocess.Popen(["vg", "view", "-Jv", "-"],
-            stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
+        tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "view", "-Jv",
+            "-"], stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
         
         # And cut
-        tasks.append(subprocess.Popen(["vg", "mod", "-X100", "-"],
-            stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
+        tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "mod", "-X100",
+            "-"], stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
             
         # And uniq
-        tasks.append(subprocess.Popen(["vg", "ids", "-s", "-"],
-            stdin=tasks[-1].stdout, stdout=output_file))
+        tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "ids", "-s",
+            "-"], stdin=tasks[-1].stdout, stdout=output_file))
             
         # Did we make it through all the tasks OK?
         for task in tasks:
@@ -160,8 +205,8 @@ def run_region_alignments(job, options, region, url):
     # Now run the indexer.
     # TODO: support both indexing modes
     RealTimeLogger.get().info("Indexing {}".format(graph_filename))
-    subprocess.check_call(["vg", "index", "-s", "-k", str(options.kmer_size),
-        "-e", str(options.edge_max), graph_filename])
+    subprocess.check_call(["{}/vg".format(bin_dir), "index", "-s", "-k",
+        str(options.kmer_size), "-e", str(options.edge_max), graph_filename])
         
     # Now save the indexed graph directory to the file store. It can be cleaned
     # up since only our children use it.
@@ -197,18 +242,22 @@ def run_region_alignments(job, options, region, url):
     
         # Go and bang that input fastq against the correct indexed graph.
         # Its output will go to the right place in the output store.
-        job.addChildJobFn(run_alignment, options, region, index_dir_id,
-            sample_fastq, alignment_file_key, stats_file_key, cores=32,
-            memory="240G", disk="100G")
+        job.addChildJobFn(run_alignment, options, bin_dir_id, region,
+            index_dir_id, sample_fastq, alignment_file_key, stats_file_key,
+            cores=32, memory="240G", disk="100G")
    
-def run_alignment(job, options, region, index_dir_id, sample_fastq_key, 
-    alignment_file_key, stats_file_key):
+def run_alignment(job, options, bin_dir_id, region, index_dir_id,
+    sample_fastq_key, alignment_file_key, stats_file_key):
     """
     Align the the given fastq from the input store against the given indexed
     graph (in the file store as a directory) and put the GAM and statistics in
     the given output keys in the output store.
     
     """
+    
+    # Download the binaries
+    bin_dir = "{}/bin".format(job.fileStore.getLocalTempDir())
+    toillib.read_global_directory(job.fileStore, bin_dir_id, bin_dir)
     
     # Download the indexed graph to a directory we can use
     graph_dir = "{}/graph".format(job.fileStore.getLocalTempDir())
@@ -234,8 +283,8 @@ def run_alignment(job, options, region, index_dir_id, sample_fastq_key,
         # Start the aligner and have it write to the file
         
         # Plan out what to run
-        vg_parts = ["vg", "map", "-f", fastq_file, "-i", "-n3", "-M2", "-k", 
-            str(options.kmer_size), graph_file]
+        vg_parts = ["{}/vg".format(bin_dir), "map", "-f", fastq_file, "-i",
+            "-n3", "-M2", "-k", str(options.kmer_size), graph_file]
         
         RealTimeLogger.get().info("Running VG: {}".format(" ".join(vg_parts)))
         
@@ -256,8 +305,8 @@ def run_alignment(job, options, region, index_dir_id, sample_fastq_key,
     RealTimeLogger.get().info("Aligned {}".format(output_file))
            
     # Read the alignments in in JSON-line format
-    view = subprocess.Popen(["vg", "view", "-aj", output_file],
-        stdout=subprocess.PIPE)
+    view = subprocess.Popen(["{}/vg".format(bin_dir), "view", "-aj",
+        output_file], stdout=subprocess.PIPE)
        
     # Count up the stats: total reads, total mapped at all, total multimapped,
     # primary alignment score counts, secondary alignment score counts, and
