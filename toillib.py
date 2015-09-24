@@ -11,7 +11,9 @@ import SocketServer, struct, socket, threading, tarfile, shutil
 # We need some stuff in order to have Azure
 try:
     import azure
-    import azure.storage.blob
+    # Make sure to get the 0.11 BlobService, in case the new azure storage
+    # module is also installed.
+    from azure.storage import BlobService
     import toil.jobStores.azureJobStore
     have_azure = True
 except ImportError:
@@ -473,7 +475,7 @@ class AzureIOStore(IOStore):
                 self.container_name, self.name_prefix))
         
             # Connect to the blob service where we keep everything
-            self.connection = azure.storage.blob.BlobService(
+            self.connection = BlobService(
                 account_name=self.account_name, account_key=self.account_key)
             
             
