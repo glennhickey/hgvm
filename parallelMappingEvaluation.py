@@ -133,7 +133,7 @@ def run_all_alignments(job, options):
         
         # We cleverly just split the lines out to different nodes
         job.addChildJobFn(run_region_alignments, options, bin_dir_id, region,
-            url, cores=32, memory="240G", disk="100G")
+            url, cores=16, memory="100G", disk="50G")
             
         # Say what we did
         RealTimeLogger.get().info("Running child for {}".format(parts[1]))
@@ -244,7 +244,7 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
         # Its output will go to the right place in the output store.
         job.addChildJobFn(run_alignment, options, bin_dir_id, region,
             index_dir_id, sample_fastq, alignment_file_key, stats_file_key,
-            cores=32, memory="240G", disk="100G")
+            cores=16, memory="100G", disk="50G")
    
 def run_alignment(job, options, bin_dir_id, region, index_dir_id,
     sample_fastq_key, alignment_file_key, stats_file_key):
@@ -404,7 +404,7 @@ def main(args):
     
     # Make a root job
     root_job = Job.wrapJobFn(run_all_alignments, options,
-        cores=32, memory="240G", disk="100G")
+        cores=16, memory="100G", disk="50G")
     
     # Run it and see how many jobs fail
     failed_jobs = Job.Runner.startToil(root_job,  options)
