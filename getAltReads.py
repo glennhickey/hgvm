@@ -599,15 +599,11 @@ def downloadRegion(job, options, region_name, file_url, range_list,
     for range_string in range_list:
         # For every range we want from it...
         
-        # Make a file that will live through us and our follow-ons.
-        # TODO: When/if actual global files become a thing, don't do that.
-        file_id = job.fileStore.getEmptyFileStoreID()
-        
         # Set up a child job to grab it that returns a file store ID for the
         # BAM file it gets. Right now these are promises, but they get
         # filled in later.
         part_promises.append(job.addChildJobFn(downloadRange, options,
-            file_url, range_string, file_id, cores=1, memory="1G",
+            file_url, range_string, cores=1, memory="1G",
             disk="50G").rv())
                 
     # Make a follow-on that concatenates the parts together
@@ -615,7 +611,7 @@ def downloadRegion(job, options, region_name, file_url, range_list,
         bam_filename, cores=1, memory="4G", disk="50G")
         
         
-def downloadRange(job, options, file_url, range_string, file_id=None):
+def downloadRange(job, options, file_url, range_string):
     """
     Download the given range from the given HTSlib file, put the resultiung BAM
     in the file store, and return its file ID.
@@ -661,19 +657,11 @@ def downloadRange(job, options, file_url, range_string, file_id=None):
                 # Complain we need to retry
                 RealTimeLogger.get().warning(
                     "Need to retry download of {}".format(file_url))
-                # But keep loping
+                # But keep looping
                     
-                
-                
-    if file_id is None:
-        # Put the BAM in the file store with a new ID
-        file_id = job.fileStore.writeGlobalFile(bam_filename)
-    else:
-        # Put the BAM in the file store with the given existing ID. This
-        # prevents it from vanishing when this jhob and all its "global" files
-        # are cleaned up.
-        job.fileStore.updateGlobalFile(file_id, bam_filename)
-    
+    # Put the BAM in the file store with a new ID
+    file_id = job.fileStore.writeGlobalFile(bam_filename, cleanup=False)
+
     RealTimeLogger.get().info("Wrote file to ID {}".format(file_id))
     
     return file_id
