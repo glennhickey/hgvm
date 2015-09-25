@@ -942,6 +942,9 @@ def main(args):
     name. The return value should be used as the program's exit code.
     """
     
+    # Reimport classes we need so the module is right
+    from parallelMappingEvaluation import AzureIOStore
+    
     if len(args) == 2 and args[1] == "--test":
         # Run the tests
         return doctest.testmod(optionflags=doctest.NORMALIZE_WHITESPACE)
