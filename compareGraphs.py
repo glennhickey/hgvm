@@ -7,7 +7,7 @@ import argparse, sys, os, os.path, random, subprocess, shutil, itertools, glob
 import doctest, re, json, collections, time, timeit, string
 from toil.job import Job
 from parallelMappingEvaluation import RealTimeLogger, robust_makedirs
-from callVariants import temp_path, alignment_read_tag, alignment_map_tag
+from callVariants import call_path, augmented_vg_path, alignment_read_tag, alignment_map_tag
 
 def parse_args(args):
     parser = argparse.ArgumentParser(description=__doc__, 
@@ -78,13 +78,29 @@ def compute_comparison(job, baseline, graph, options):
     
     if do_comp:        
         os.system("vg compare {} {} > {}".format(baseline, graph, out_path))
-    
+           
+def count_gam_paths(graph, options):
+    """ get number of snps by counting the paths in an alignment. only
+    workds for agumented vg graphs made by the callVariants script
+    """
+    aug_tag = os.path.basename(augmented_vg_path("/a/b/c", options))[1:]
+    call_tag = os.path.basename(call_path("/a/b/c", options))[1:]
+    if graph.find(aug_tag) < 0:
+        return -1
+    gam = graph.replace(aug_tag, call_tag)
+    cmd = "vg view -a -j {} | jq .path | jq length | wc -l".format(gam)
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                         stderr=sys.stderr, bufsize=-1)
+    output, _ = p.communicate()
+    assert p.wait() == 0
+    num_paths = int(output.strip())
+    return num_paths
 
 def summarize_comparisons(job, options):
     """ make the table by scraping together all the comparison
     json files
     """
-    table = "#graph\tmissing\tfound\textra\n"
+    table = "#graph\tmissing\tfound\textra\t1-jaccard\tnum_snps\n"
     for graph in options.graphs:
         comp_path = comparison_path(options.baseline, graph, options)
         with open(comp_path) as f:
@@ -92,8 +108,10 @@ def summarize_comparisons(job, options):
             base_only = j["db1_only"]
             graph_only = j["db2_only"]
             both = j["intersection"]
-            table += "{}\t{}\t{}\t{}\n".format(os.path.splitext(os.path.basename(graph))[0],
-                                               base_only, both, graph_only)
+            num_paths = count_gam_paths(graph, options)
+            jaccard = 1. - float(j["intersection"]) / float(j["union"])
+            table += "{}\t{}\t{}\t{}\t{}\n".format(os.path.splitext(os.path.basename(graph))[0],
+                                                   base_only, both, graph_only, jaccard, num_paths)
     with open(options.out_tsv, "w") as ofile:
         ofile.write(table)
 
@@ -131,7 +149,7 @@ def main(args):
 
     for graph in options.graphs:
         if len(graph.split("/")) < 3 or os.path.splitext(graph)[1] != ".vg":
-            raise RuntimeError("Input gam paths must be of the form "
+            raise RuntimeError("Input graph paths must be of the form "
                                ".../<alg>/<reads>/<filename>.vg")
 
     # Make a root job

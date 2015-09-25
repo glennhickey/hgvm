@@ -8,6 +8,9 @@ import argparse, sys, os, os.path, random, subprocess, shutil, itertools, glob
 import doctest, re, json, collections, time, timeit, string
 from Bio.Phylo.TreeConstruction import _DistanceMatrix, DistanceTreeConstructor
 from Bio import Phylo
+import matplotlib
+matplotlib.use('Agg')
+import pylab
 from toil.job import Job
 from parallelMappingEvaluation import RealTimeLogger, robust_makedirs
 
@@ -26,9 +29,8 @@ def parse_args(args):
     parser.add_argument("--overwrite", action="store_true", default=False,
                         help="overwrite existing files")                        
     args = args[1:]
-        
-    return parser.parse_args(args)
 
+    return parser.parse_args(args)
 
 def index_path(graph, options):
     """ get the path of the index given the graph
@@ -63,7 +65,7 @@ def tree_path(options):
     """
     return os.path.join(options.out_dir, "tree.newick")
 
-def cluster_comparisons(job, options):
+def cluster_comparisons(options):
     """ scape the comparison files into a distance matrix, cluster into
     a tree
     """    
@@ -79,7 +81,10 @@ def cluster_comparisons(job, options):
                 jaccard = -1.
                 with open(jpath) as f:
                     j = json.loads(f.read())
-                    jaccard = float(j["intersection"]) / float(j["union"])
+                    if float(j["union"]) == 0:
+                        jaccard = 2.
+                    else:
+                        jaccard = float(j["intersection"]) / float(j["union"])
                 mat[graph1][graph2] = 1. - jaccard
                 mat[graph2][graph1] = 1. - jaccard
 
@@ -108,13 +113,9 @@ def cluster_comparisons(job, options):
     robust_makedirs(os.path.dirname(tree_path(options)))
     Phylo.write(tree, tree_path(options), "newick")
 
-    # png tree
-    try:
-        import pylab
-        Phylo.draw_graphviz(tree)
-        pylab.savefig(tree_path(options).replace("newick", "png"))
-    except:
-        pass
+    # png tree -- note : doesn't work in toil
+    Phylo.draw_graphviz(tree)
+    pylab.savefig(tree_path(options).replace("newick", "png"))
 
 def compute_kmer_comparison(job, graph1, graph2, options):
     """ run vg compare between two graphs
@@ -140,8 +141,6 @@ def compute_comparisons(job, options):
             if graph1 <= graph2:
                 job.addChildJobFn(compute_kmer_comparison, graph1, graph2, options)
 
-    job.addFollowOnJobFn(cluster_comparisons, options)
-                
 def compute_kmer_indexes(job, options):
     """ run everything (root toil job)
     first all indexes are computed,
@@ -176,6 +175,9 @@ def main(args):
         raise Exception("{} jobs failed!".format(failed_jobs))
                                
     RealTimeLogger.stop_master()
+
+    # Do the drawing outside toil to get around weird import problems
+    cluster_comparisons(options)
     
 if __name__ == "__main__" :
     sys.exit(main(sys.argv))
