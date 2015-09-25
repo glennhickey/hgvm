@@ -450,20 +450,43 @@ class AzureIOStore(IOStore):
         self.account_key = toil.jobStores.azureJobStore._fetchAzureAccountKey(
             self.account_name)
             
+        # This will hold out Azure blob store connection
+        self.connection = None
+        
+    def __getstate__(self):
+        """
+        Return the state to use for pickling. We don't want to try and pickle
+        an open Azure connection.
+        """
+     
+        return (self.account_name, self.account_key, self.container_name, 
+            self.name_prefix)
+        
+    def __setstate__(self, state):
+        """
+        Set up after unpickling.
+        """
+        
+        self.account_name = state[0]
+        self.account_key = state[1]
+        self.container_name = state[2]
+        self.name_prefix = state[3]
+        
+        self.connection = None
+        
     def __connect(self):
         """
         Make sure we have an Azure connection, and set one up if we don't.
         """
         
-        RealTimeLogger.get().info("Connecting to account {}, using "
-            "container {} and prefix {}".format(self.account_name,
-            self.container_name, self.name_prefix))
-    
-        # Connect to the blob service where we keep everything
-        connection = BlobService(
-            account_name=self.account_name, account_key=self.account_key)
-                
-        return connection
+        if self.connection is None:
+            RealTimeLogger.get().info("Connecting to account {}, using "
+                "container {} and prefix {}".format(self.account_name,
+                self.container_name, self.name_prefix))
+        
+            # Connect to the blob service where we keep everything
+            self.connection = BlobService(
+                account_name=self.account_name, account_key=self.account_key)
             
             
     def read_input_file(self, input_path, local_path):
@@ -471,7 +494,7 @@ class AzureIOStore(IOStore):
         Get input from Azure.
         """
         
-        connection = self.__connect()
+        self.__connect()
         
         
         RealTimeLogger.get().info("Loading {} from AzureIOStore".format(
@@ -479,7 +502,7 @@ class AzureIOStore(IOStore):
         
         # Download the blob. This is known to be synchronous, although it can
         # call a callback during the process.
-        connection.get_blob_to_path(self.container_name,
+        self.connection.get_blob_to_path(self.container_name,
             self.name_prefix + input_path, local_path)
             
     def list_input_directory(self, input_path):
@@ -492,7 +515,7 @@ class AzureIOStore(IOStore):
         
         """
         
-        connection = self.__connect()
+        self.__connect()
         
         RealTimeLogger.get().info("Enumerating {} from AzureIOStore".format(
             input_path))
@@ -515,7 +538,7 @@ class AzureIOStore(IOStore):
         
             # Get the results from Azure. We skip the delimiter since it doesn't
             # seem to have the placeholder entries it's suppsoed to.
-            result = connection.list_blobs(self.container_name, 
+            result = self.connection.list_blobs(self.container_name, 
                 prefix=fake_directory, marker=marker)
                 
             for blob in result:
@@ -548,21 +571,21 @@ class AzureIOStore(IOStore):
         Write output to Azure. Will create the container if necessary.
         """
         
-        connection = self.__connect()
+        self.__connect()
         
         RealTimeLogger.get().info("Saving {} to AzureIOStore".format(
             output_path))
         
         try:
             # Make the container
-            connection.create_container(self.container_name)
+            self.connection.create_container(self.container_name)
         except azure.WindowsAzureConflictError:
             # The container probably already exists
             pass
         
         # Upload the blob (synchronously)
         # TODO: catch no container error here, make the container, and retry
-        connection.put_block_blob_from_path(self.container_name,
+        self.connection.put_block_blob_from_path(self.container_name,
             self.name_prefix + output_path, local_path)
 
 ###END TOILLIB
@@ -591,9 +614,9 @@ def parse_args(args):
     # General options
     parser.add_argument("server_list", type=argparse.FileType("r"),
         help="TSV file continaing <region>\t<url> lines for servers to test")
-    parser.add_argument("sample_store", type=IOStore.get,
+    parser.add_argument("sample_store",
         help="sample input IOStore with <region>/<sample>/<sample>.bam.fq")
-    parser.add_argument("out_store", type=IOStore.get,
+    parser.add_argument("out_store",
         help="output IOStore to create and fill with alignments and stats")
     parser.add_argument("--server_version", default="v0.6.g",
         help="server version to add to URLs")
@@ -624,6 +647,12 @@ def run_all_alignments(job, options):
     align and evaluate it.
 
     """
+    
+    # Set up the IO stores on a node, under the worker script, so that weird
+    # pickling things won't happen.
+    options.sample_store = IOStore.get(options.sample_store)
+    options.out_store = IOStore.get(options.out_store)
+    
     
     # Get the CA file needed to verify the binary downloads
     # The certificate has to come from somewhere trusted by system wget.
@@ -941,10 +970,6 @@ def main(args):
     "args" specifies the program arguments, with args[0] being the executable
     name. The return value should be used as the program's exit code.
     """
-    
-    # Hack the module name of the classes we define so they can be imported when
-    # we aren't the main script.
-    AzureIOStore.__module__ = "parallelMappingEvaluation"
     
     if len(args) == 2 and args[1] == "--test":
         # Run the tests
