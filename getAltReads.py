@@ -8,7 +8,7 @@ server in parallel, using Toil.
 import argparse, sys, os, os.path, random, collections, shutil, itertools, glob
 import urllib2, urlparse, ftplib, fnmatch, subprocess
 import json, logging, logging.handlers, SocketServer, struct, socket, threading
-import time
+import time, select
 
 from toil.job import Job
 import tsv
@@ -45,11 +45,14 @@ def parse_args(args):
         default=["BRCA1", "BRCA2", "CENX", "MHC", "SMA", "LRC_KIR"],
         help="region names to download reads for")
     parser.add_argument("--sample_ftp_root",
-        default="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data", 
+        default=("ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/"
+        "1000_genomes_project/data"), 
         help="FTP directory to scan for samples")
+    parser.add_argument("--population_pattern", default="*", 
+        help="fnmatch-style pattern for population names")
     parser.add_argument("--sample_pattern", default="NA*", 
         help="fnmatch-style pattern for sample names")
-    parser.add_argument("--file_pattern", default="*.cram", 
+    parser.add_argument("--file_pattern", default="*.low_coverage.cram", 
         help="fnmatch-style pattern for read files in sample directories")
     parser.add_argument("--index_suffix", default=".crai", 
         help="suffix to add to sample files to get index files")
@@ -265,6 +268,25 @@ def explore_path(ftp, path, pattern):
         except ftplib.error_proto:
             # For some reason this built-in function sometimes doesn't work. Try
             # doing it ourselves.
+            
+            RealTimeLogger.get().warning("FTPlib nlst on {} failed. Clearing "
+                "and retrying.".format(path))
+            
+            while True:
+                # Clear out any crap that may be coming over the ftp connection.
+                # Use a 2 second timeout
+                flags = select.select([ftp.sock], [], [], 2)
+                
+                if not flags[0]:
+                    # Nothing came
+                    break
+                    
+                # Otherwise read some data and select again
+                got = ftp.sock.recv(1024)
+                RealTimeLogger.get().warning("Extra data: {}".format(got))
+            
+            
+            # Now manually do the listing
             listing = []
             ftp.retrlines("NLST", lambda line: listing.append(line))
         
@@ -440,61 +462,78 @@ def downloadAllReads(job, options):
     # turning found index files into URLs.
     base_url = options.sample_ftp_root[:-len(root_path)]
     
-    # Grab all the sample names that match the sample name pattern.
-    # Hopefully there aren't too many.
-    sample_names = [n for n in ftp.nlst() if fnmatch.fnmatchcase(n,
-        options.sample_pattern)]
-    
-    # This holds URLs to data files (BAM/CRAM) with indexes that are on a
-    # sufficient number of contigs, by sample name. We take the first
-    # sufficiently good file for any sample.
-    sample_file_urls = {}
-    
     # Dump the good data files for samples
     good_samples = open("{}/good.txt".format(options.out_dir), "w")
     
-    # TODO: handle failures during explore_path?
-    for sample_name in sample_names:
-        # For every sample
+    # Grab all the population names that match the population pattern
+    population_names = [n for n in ftp.nlst() if fnmatch.fnmatchcase(n,
+        options.population_pattern)]
         
-        print("Try {}".format(sample_name))
+    # TODO: We'll go through them in this order, so if you want a representative
+    # subsampling, add some shuffle here or something.
+
+    for population_name in population_names:
+    
+        # For each of those, we need to get samples
+        # Go to the population root
+        ftp.cwd("{}/{}".format(root_path, population_name))
         
-        for data_name in explore_path(ftp, "{}/{}".format(root_path,
-            sample_name), options.file_pattern):
-            # Find its data files (there may be several)
+        # Grab all the sample names that match the sample name pattern.
+        # Hopefully there aren't too many.
+        sample_names = [n for n in ftp.nlst() if fnmatch.fnmatchcase(n,
+            options.sample_pattern)]
+        
+        # This holds URLs to data files (BAM/CRAM) with indexes that are on a
+        # sufficient number of contigs, by sample name. We take the first
+        # sufficiently good file for any sample.
+        sample_file_urls = {}
+        
+        # TODO: handle failures during explore_path?
+        for sample_name in sample_names:
+            # For every sample
             
-            # Get the index for each
-            index_name = data_name + options.index_suffix
+            print("Try {}".format(sample_name))
             
-            print(index_name)
-            
-            # Count up the contigs it indexes over
-            indexed_contigs = count_indexed_contigs("{}/{}".format(
-                base_url, index_name), options.ftp_retry)
+            for data_name in explore_path(ftp, "{}/{}/{}".format(root_path,
+                population_name, sample_name), options.file_pattern):
+                # Find its data files (there may be several)
                 
-            if indexed_contigs >= options.min_indexed_contigs:
-                # This file for this sample is good enough
-                sample_file_urls[sample_name] = "{}/{}".format(base_url,
-                    data_name)
+                # Get the index for each
+                index_name = data_name + options.index_suffix
                 
-                RealTimeLogger.get().info(
-                    "Sample {} has index of {} contigs".format(sample_name,
-                    indexed_contigs))
-                # Add the sample to the file we spit out
-                good_samples.write("{}\n".format(sample_name))
+                print(index_name)
                 
-                # Don't finish exploring the path
+                # Count up the contigs it indexes over
+                indexed_contigs = count_indexed_contigs("{}/{}".format(
+                    base_url, index_name), options.ftp_retry)
+                    
+                if indexed_contigs >= options.min_indexed_contigs:
+                    # This file for this sample is good enough
+                    sample_file_urls[sample_name] = "{}/{}".format(base_url,
+                        data_name)
+                    
+                    RealTimeLogger.get().info(
+                        "Sample {} has index of {} contigs".format(sample_name,
+                        indexed_contigs))
+                    # Add the sample to the file we spit out
+                    good_samples.write("{}\n".format(sample_name))
+                    
+                    # Don't finish exploring the path
+                    break
+                    
+                else:
+                    # Complain
+                    RealTimeLogger.get().warning(
+                        "Sample {} has index on too few contigs ({})."
+                        "Skipping!".format(sample_name, indexed_contigs))
+                    
+            if len(sample_file_urls) >= options.sample_limit:
+                # We got enough. Don't finish this population
                 break
                 
-            else:
-                # Complain
-                RealTimeLogger.get().warning(
-                    "Sample {} has index on too few contigs ({}). Skipping!".format(
-                    sample_name, indexed_contigs))
-                
         if len(sample_file_urls) >= options.sample_limit:
-            # We got enough
-            break
+                # We got enough. Don't check more populations
+                break
             
     good_samples.close()
             
