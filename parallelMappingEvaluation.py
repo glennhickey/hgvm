@@ -627,12 +627,8 @@ def parse_args(args):
     parser.add_argument("--kmer_size", type=int, default=10, 
         help="size of kmers to use in indexing and mapping")
     parser.add_argument("--bin_url",
-        default="https://hgwdev.sdsc.edu/~anovak/bin",
+        default="https://hgvm.blob.core.windows.net/hgvm-bin",
         help="URL to download sg2vg and vg binaries from, without Docker")
-    parser.add_argument("--ca_cert_url",
-        default="https://www.incommon.org/certificates/repository/"
-        "sha384%20Intermediate%20cert.txt",
-        help="CA PEM certificate to download and use to get the binaries")
     
     # The command line arguments start with the program name, which we don't
     # want to treat as an argument for argparse. So we remove it.
@@ -653,31 +649,15 @@ def run_all_alignments(job, options):
     options.sample_store = IOStore.get(options.sample_store)
     options.out_store = IOStore.get(options.out_store)
     
-    
-    # Get the CA file needed to verify the binary downloads
-    # The certificate has to come from somewhere trusted by system wget.
-    RealTimeLogger.get().info("Retrieving CA certificate {}".format(
-        options.ca_cert_url))
-    ca_file = "{}/cert.pem".format(job.fileStore.getLocalTempDir())
-    subprocess.check_call(["wget", options.ca_cert_url,
-        "-O", ca_file])
-    
-    # Fix up any \r line endings
-    RealTimeLogger.get().info("Rewriting certificate")
-    subprocess.check_call(["tr", "\\r", "\\n"], stdin=open(ca_file, "r"),
-        stdout=open(ca_file + ".fixed", "w"))
-    os.rename(ca_file + ".fixed", ca_file)
-    
-    
-    # Retrieve binaries we need, using the certificate
+    # Retrieve binaries we need
     RealTimeLogger.get().info("Retrieving binaries from {}".format(
         options.bin_url))
     bin_dir = "{}/bin".format(job.fileStore.getLocalTempDir())
     robust_makedirs(bin_dir)
     subprocess.check_call(["wget", "{}/sg2vg".format(options.bin_url),
-        "--ca-certificate", ca_file, "-O", "{}/sg2vg".format(bin_dir)])
+        "-O", "{}/sg2vg".format(bin_dir)])
     subprocess.check_call(["wget", "{}/vg".format(options.bin_url),
-        "--ca-certificate", ca_file, "-O", "{}/vg".format(bin_dir)])
+        "-O", "{}/vg".format(bin_dir)])
         
     # Make them executable
     os.chmod("{}/sg2vg".format(bin_dir), 0o744)
