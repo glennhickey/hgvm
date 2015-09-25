@@ -942,8 +942,9 @@ def main(args):
     name. The return value should be used as the program's exit code.
     """
     
-    # Reimport classes we need so the module is right
-    from parallelMappingEvaluation import AzureIOStore
+    # Hack the module name of the classes we define so they can be imported when
+    # we aren't the main script.
+    AzureIOStore.__module__ = "parallelMappingEvaluation"
     
     if len(args) == 2 and args[1] == "--test":
         # Run the tests
