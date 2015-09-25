@@ -450,43 +450,20 @@ class AzureIOStore(IOStore):
         self.account_key = toil.jobStores.azureJobStore._fetchAzureAccountKey(
             self.account_name)
             
-        # This will hold out Azure blob store connection
-        self.connection = None
-        
-    def __getstate__(self):
-        """
-        Return the state to use for pickling. We don't want to try and pickle
-        an open Azure connection.
-        """
-     
-        return (self.account_name, self.account_key, self.container_name, 
-            self.name_prefix)
-        
-    def __setstate__(self, state):
-        """
-        Set up after unpickling.
-        """
-        
-        self.account_name = state[0]
-        self.account_key = state[1]
-        self.container_name = state[2]
-        self.name_prefix = state[3]
-        
-        self.connection = None
-        
     def __connect(self):
         """
         Make sure we have an Azure connection, and set one up if we don't.
         """
         
-        if self.connection is None:
-            RealTimeLogger.get().info("Connecting to account {}, using "
-                "container {} and prefix {}".format(self.account_name,
-                self.container_name, self.name_prefix))
-        
-            # Connect to the blob service where we keep everything
-            self.connection = BlobService(
-                account_name=self.account_name, account_key=self.account_key)
+        RealTimeLogger.get().info("Connecting to account {}, using "
+            "container {} and prefix {}".format(self.account_name,
+            self.container_name, self.name_prefix))
+    
+        # Connect to the blob service where we keep everything
+        connection = BlobService(
+            account_name=self.account_name, account_key=self.account_key)
+                
+        return connection
             
             
     def read_input_file(self, input_path, local_path):
@@ -494,7 +471,7 @@ class AzureIOStore(IOStore):
         Get input from Azure.
         """
         
-        self.__connect()
+        connection = self.__connect()
         
         
         RealTimeLogger.get().info("Loading {} from AzureIOStore".format(
@@ -502,7 +479,7 @@ class AzureIOStore(IOStore):
         
         # Download the blob. This is known to be synchronous, although it can
         # call a callback during the process.
-        self.connection.get_blob_to_path(self.container_name,
+        connection.get_blob_to_path(self.container_name,
             self.name_prefix + input_path, local_path)
             
     def list_input_directory(self, input_path):
@@ -515,7 +492,7 @@ class AzureIOStore(IOStore):
         
         """
         
-        self.__connect()
+        connection = self.__connect()
         
         RealTimeLogger.get().info("Enumerating {} from AzureIOStore".format(
             input_path))
@@ -538,7 +515,7 @@ class AzureIOStore(IOStore):
         
             # Get the results from Azure. We skip the delimiter since it doesn't
             # seem to have the placeholder entries it's suppsoed to.
-            result = self.connection.list_blobs(self.container_name, 
+            result = connection.list_blobs(self.container_name, 
                 prefix=fake_directory, marker=marker)
                 
             for blob in result:
@@ -571,21 +548,21 @@ class AzureIOStore(IOStore):
         Write output to Azure. Will create the container if necessary.
         """
         
-        self.__connect()
+        connection = self.__connect()
         
         RealTimeLogger.get().info("Saving {} to AzureIOStore".format(
             output_path))
         
         try:
             # Make the container
-            self.connection.create_container(self.container_name)
+            connection.create_container(self.container_name)
         except azure.WindowsAzureConflictError:
             # The container probably already exists
             pass
         
         # Upload the blob (synchronously)
         # TODO: catch no container error here, make the container, and retry
-        self.connection.put_block_blob_from_path(self.container_name,
+        connection.put_block_blob_from_path(self.container_name,
             self.name_prefix + output_path, local_path)
 
 ###END TOILLIB
