@@ -73,17 +73,17 @@ def draw_len(weight):
     magnitude.  try to map them into something for graphviz edge length hint
     """
     if weight < 0.00001:
-        return 0.5
+        return 0.25
     elif weight < 0.001:
-        return 1
+        return 5
     elif weight < 0.01:
-        return 1.5
+        return .75
     elif weight < 0.1:
-        return 2
+        return 1
     elif weight < 0.5:
-        return 2.5
+        return 1.25
     else:
-        return 3
+        return 1.5
 
 def cluster_comparisons(options):
     """ scape the comparison files into a distance matrix, cluster into
