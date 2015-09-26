@@ -104,7 +104,9 @@ def cluster_comparisons(options):
     for i in xrange(len(options.graphs)):
         row = []
         for j in xrange(i + 1):
-            row.append(mat[options.graphs[i]][options.graphs[j]])
+            # biopython doesnt seem super fond of 0, let's hack in a little constant
+            val = max(0.000001, mat[options.graphs[i]][options.graphs[j]])
+            row.append(val)
         matrix.append(row)
     dm = _DistanceMatrix(names, matrix)
 
@@ -145,6 +147,7 @@ def cluster_comparisons(options):
         edge["weight"] = None
         edge["label"] = "{0:.3g}".format(float(weight) * 100.)
         edge["fontsize"] = 8
+        edge["length"] = float(weight) * 100.
     nx.write_dot(nxgraph, tree_path(options).replace("newick", "dot"))
     
 
