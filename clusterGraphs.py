@@ -5,7 +5,7 @@ Current implementation : neighbour joining tree using Jaccard distance matrix
 """
 
 import argparse, sys, os, os.path, random, subprocess, shutil, itertools, glob
-import doctest, re, json, collections, time, timeit, string
+import doctest, re, json, collections, time, timeit, string, math
 from Bio.Phylo.TreeConstruction import _DistanceMatrix, DistanceTreeConstructor
 from Bio import Phylo
 import matplotlib
@@ -27,6 +27,8 @@ def parse_args(args):
                         help="other graph(s) to compare to baseline")
     parser.add_argument("out_dir", type=str,
                         help="directory to which results will be written.")
+    parser.add_argument("--kmer", type=int, default=10,
+                        help="kmer size for comparison")
     parser.add_argument("--overwrite", action="store_true", default=False,
                         help="overwrite existing files")                        
     args = args[1:]
@@ -66,6 +68,23 @@ def tree_path(options):
     """
     return os.path.join(options.out_dir, "tree.newick")
 
+def draw_len(weight):
+    """ actual weights are between 0 and 1 but vary by many orders of
+    magnitude.  try to map them into something for graphviz edge length hint
+    """
+    if weight < 0.00001:
+        return 0.5
+    elif weight < 0.001:
+        return 1
+    elif weight < 0.01:
+        return 1.5
+    elif weight < 0.1:
+        return 2
+    elif weight < 0.5:
+        return 2.5
+    else:
+        return 3
+
 def cluster_comparisons(options):
     """ scape the comparison files into a distance matrix, cluster into
     a tree
@@ -104,8 +123,13 @@ def cluster_comparisons(options):
     for i in xrange(len(options.graphs)):
         row = []
         for j in xrange(i + 1):
-            # biopython doesnt seem super fond of 0, let's hack in a little constant
-            val = max(0.000001, mat[options.graphs[i]][options.graphs[j]])
+            # tree constructor writes 0-distances as 1s for some reason
+            # so we hack around here
+            val = float(mat[options.graphs[i]][options.graphs[j]])
+            if val == 0.:
+                val = 1e-10
+            elif val == 1.:
+                val = 1.1
             row.append(val)
         matrix.append(row)
     dm = _DistanceMatrix(names, matrix)
@@ -143,11 +167,16 @@ def cluster_comparisons(options):
     for edge_id in nxgraph.edges():
         edge = nxgraph.edge[edge_id[0]][edge_id[1]]
         # in graphviz, weight means something else, so make it a label
-        weight = edge["weight"]
+        weight = float(edge["weight"])
+        # undo hack from above
+        if weight > 1:
+            weight = 1.
+        if weight <= 1e-10 or weight == 1.:
+            weight = 0.
         edge["weight"] = None
         edge["label"] = "{0:.3g}".format(float(weight) * 100.)
         edge["fontsize"] = 8
-        edge["length"] = float(weight) * 100.
+        edge["len"] = draw_len(weight)
     nx.write_dot(nxgraph, tree_path(options).replace("newick", "dot"))
     
 
