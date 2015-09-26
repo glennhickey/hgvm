@@ -644,10 +644,10 @@ def run_all_alignments(job, options):
 
     """
     
-    # Set up the IO stores on a node, under the worker script, so that weird
-    # pickling things won't happen.
-    options.sample_store = IOStore.get(options.sample_store)
-    options.out_store = IOStore.get(options.out_store)
+    # Set up the IO stores each time, since we can't unpickle them on Azure for
+    # some reason.
+    sample_store = IOStore.get(options.sample_store)
+    out_store = IOStore.get(options.out_store)
     
     # Retrieve binaries we need
     RealTimeLogger.get().info("Retrieving binaries from {}".format(
@@ -707,6 +707,11 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
     """
     
     RealTimeLogger.get().info("Running on {} for {}".format(url, region))
+    
+    # Set up the IO stores each time, since we can't unpickle them on Azure for
+    # some reason.
+    sample_store = IOStore.get(options.sample_store)
+    out_store = IOStore.get(options.out_store)
     
     # Download the binaries
     bin_dir = "{}/bin".format(job.fileStore.getLocalTempDir())
@@ -778,7 +783,7 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
     region_dir = region.upper()
     
     # What samples do we do? List input sample names up to the given limit.
-    input_samples = list(options.sample_store.list_input_directory(
+    input_samples = list(sample_store.list_input_directory(
         region_dir))[:options.sample_limit]
     
     # Work out the directory for the alignments to be dumped in in the output
@@ -816,6 +821,11 @@ def run_alignment(job, options, bin_dir_id, region, index_dir_id,
     
     """
     
+    # Set up the IO stores each time, since we can't unpickle them on Azure for
+    # some reason.
+    sample_store = IOStore.get(options.sample_store)
+    out_store = IOStore.get(options.out_store)
+    
     # Download the binaries
     bin_dir = "{}/bin".format(job.fileStore.getLocalTempDir())
     read_global_directory(job.fileStore, bin_dir_id, bin_dir)
@@ -829,7 +839,7 @@ def run_alignment(job, options, bin_dir_id, region, index_dir_id,
     
     # Also we need the sample fastq
     fastq_file = "{}/input.fq".format(job.fileStore.getLocalTempDir())
-    options.sample_store.read_input_file(sample_fastq_key, fastq_file)
+    sample_store.read_input_file(sample_fastq_key, fastq_file)
     
     # And temp files for our aligner output and stats
     output_file = "{}/output.gam".format(job.fileStore.getLocalTempDir())
@@ -940,8 +950,8 @@ def run_alignment(job, options, bin_dir_id, region, index_dir_id,
         
     # Now send the output files (alignment and stats) to the output store where
     # they belong.
-    options.out_store.write_output_file(output_file, alignment_file_key)
-    options.out_store.write_output_file(stats_file, stats_file_key)
+    out_store.write_output_file(output_file, alignment_file_key)
+    out_store.write_output_file(stats_file, stats_file_key)
     
         
 def main(args):
