@@ -11,6 +11,7 @@ from Bio import Phylo
 import matplotlib
 matplotlib.use('Agg')
 import pylab
+import networkx as nx
 from toil.job import Job
 from parallelMappingEvaluation import RealTimeLogger, robust_makedirs
 
@@ -114,8 +115,38 @@ def cluster_comparisons(options):
     Phylo.write(tree, tree_path(options), "newick")
 
     # png tree -- note : doesn't work in toil
-    Phylo.draw_graphviz(tree)
+    def f(x):
+        if "Inner" in str(x):
+            return ""
+        else:
+            return x
+    Phylo.draw_graphviz(tree, label_func = f, node_size=1000, node_shape="s", font_size=10)
     pylab.savefig(tree_path(options).replace("newick", "png"))
+
+    # graphviz
+    # get networkx graph
+    nxgraph = Phylo.to_networkx(tree)
+    # make undirected
+    nxgraph = nx.Graph(nxgraph)
+    # push names to name labels
+    nxgraph = nx.convert_node_labels_to_integers(nxgraph, label_attribute="label")
+    for node_id in nxgraph.nodes():
+        node = nxgraph.node[node_id]
+        if "Inner" in str(node["label"]):
+            node["label"] = "\"\""
+            node["width"] = 0.001
+            node["height"] = 0.001
+        else:
+            node["fontsize"] = 10
+    for edge_id in nxgraph.edges():
+        edge = nxgraph.edge[edge_id[0]][edge_id[1]]
+        # in graphviz, weight means something else, so make it a label
+        weight = edge["weight"]
+        edge["weight"] = None
+        edge["label"] = "{0:.3g}".format(float(weight) * 100.)
+        edge["fontsize"] = 8
+    nx.write_dot(nxgraph, tree_path(options).replace("newick", "dot"))
+    
 
 def compute_kmer_comparison(job, graph1, graph2, options):
     """ run vg compare between two graphs
