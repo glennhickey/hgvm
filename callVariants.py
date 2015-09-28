@@ -254,7 +254,7 @@ def main(args):
     
     options = parse_args(args) 
     
-    RealTimeLogger.start_master(options)
+    RealTimeLogger.start_master()
 
     for gam in options.in_gams:
         if len(gam.split("/")) < 3 or os.path.splitext(gam)[1] != ".gam":
