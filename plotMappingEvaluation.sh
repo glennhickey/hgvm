@@ -32,8 +32,8 @@ mkdir -p "${PLOTS_DIR}"
 # We need overall files for mapped and multimapped
 OVERALL_MAPPING_FILE="${PLOTS_DIR}/mapping.tsv"
 OVERALL_MAPPING_PLOT="${PLOTS_DIR}/mapping.png"
-OVERALL_SINGLE_MAPPING_FILE="${PLOTS_DIR}/multimapping.tsv"
-OVERALL_SINGLE_MAPPING_PLOT="${PLOTS_DIR}/multimapping.png"
+OVERALL_SINGLE_MAPPING_FILE="${PLOTS_DIR}/singlemapping.tsv"
+OVERALL_SINGLE_MAPPING_PLOT="${PLOTS_DIR}/singlemapping.png"
 
 for REGION in `ls ${STATS_DIR}`
 do
