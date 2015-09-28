@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Run after mapping_evaluations.sh or parallelMappingEvaluation.py.
-# Makes plots comparing the graphs in each.
+# Make one-off plots for presentation
 
 set -e
 
@@ -14,19 +13,20 @@ then
 fi
 
 # Set up the plot parameters
+# USe a ColorBrewer scheme, except drop the super light color
 PLOT_PARAMS=(
     --categories "cactus" "camel" "vg" "curoverse" "simons" "snp1000g" "prg" "debruijn-k31" "debruijn-k63"
     "refonly" "trivial" "level1" "level2" "level3"
     --category_labels "Cactus" "Camel" "VG"  "Curoverse" "Simons SNPs" "1000 GSNPs" "PRG" "k=31" "k=63"
     "RefOnly" "Trivial" "Level1" "Level2" "Level3"
-    --colors "#5C755E" "#C19A6B" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m" "c" "b" "c" "m" "y"
+    --colors "#7fc97f" "#fdc086" "k" "k" "#386cb0" "#beaed4" "k" "#8000FF" "#f0027f" "#bf5b17" "#666666" "k" "k" "k"
 )
 
 # Where are the stats files
 STATS_DIR="${INPUT_DIR}/stats"
 
 # Where do we put the plots?
-PLOTS_DIR="${INPUT_DIR}/plots"
+PLOTS_DIR="${INPUT_DIR}/presplots"
 mkdir -p "${PLOTS_DIR}"
 
 # We need overall files for mapped and multimapped
@@ -86,25 +86,25 @@ do
     done
     
     ./boxplot.py "${MAPPING_FILE}" \
-        --title "$(printf "Well-mapped (<=2 mismatches)\nreads in ${REGION^^}")" \
-        --x_label "Graph" --y_label "Portion Well-mapped" --save "${MAPPING_PLOT}" \
+        --title "" \
+        --x_label "Graph" --y_label "Portion well-mapped" --save "${MAPPING_PLOT}" \
         --x_sideways \
         "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90
+        --font_size 20 --dpi 300 --line_width 3
         
     ./boxplot.py "${MULTIMAPPING_FILE}" \
-        --title "$(printf "Not-well-multimapped\n(>2 mismatches or unmultimapped)\nreads in ${REGION^^}")" \
+        --title "" \
         --x_label "Graph" --y_label "Portion not-well-multimapped" --save "${MULTIMAPPING_PLOT}" \
         --x_sideways \
         "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90
+        --font_size 20 --dpi 300 --line_width 3
         
     ./boxplot.py "${RUNTIME_FILE}" \
-        --title "$(printf "Aligner runtime\n in ${REGION^^}")" \
+        --title "" \
         --x_label "Graph" --y_label "Runtime per sample (seconds)" --save "${RUNTIME_PLOT}" \
         --x_sideways \
         "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90
+        --font_size 20 --dpi 300 --line_width 3
     
 done
 
@@ -114,16 +114,16 @@ cat "${PLOTS_DIR}"/multimapping.*.tsv > "${OVERALL_MULTIMAPPING_FILE}"
 
 # Make the overall plots
 ./boxplot.py "${OVERALL_MAPPING_FILE}" \
-    --title "$(printf "Well-mapped\n(<=2 mismatches)\nreads")" \
-    --x_label "Graph" --y_label "Portion Well-mapped" --save "${OVERALL_MAPPING_PLOT}" \
+    --title "" \
+    --x_label "Graph" --y_label "Portion well-mapped" --save "${OVERALL_MAPPING_PLOT}" \
     --x_sideways \
     "${PLOT_PARAMS[@]}" \
-    --font_size 20 --dpi 90
+    --font_size 20 --dpi 300 --line_width 3
         
 ./boxplot.py "${OVERALL_MULTIMAPPING_FILE}" \
-    --title "$(printf "Not-well-multimapped\n(>2 mismatches or unmultimapped)\nreads")" \
+    --title "" \
     --x_label "Graph" --y_label "Portion not-well-multimapped" --save "${OVERALL_MULTIMAPPING_PLOT}" \
     --x_sideways \
     "${PLOT_PARAMS[@]}" \
-    --font_size 20 --dpi 90
+    --font_size 20 --dpi 300 --line_width 3
 
