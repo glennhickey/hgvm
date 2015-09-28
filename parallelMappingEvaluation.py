@@ -625,7 +625,7 @@ class AzureIOStore(IOStore):
             for blob in result:
                 # Look at each blob
                 
-                if blob.name == path:
+                if blob.name == self.name_prefix + path:
                     # Found it
                     return True
                 
