@@ -32,8 +32,8 @@ mkdir -p "${PLOTS_DIR}"
 # We need overall files for mapped and multimapped
 OVERALL_MAPPING_FILE="${PLOTS_DIR}/mapping.tsv"
 OVERALL_MAPPING_PLOT="${PLOTS_DIR}/mapping.png"
-OVERALL_MULTIMAPPING_FILE="${PLOTS_DIR}/multimapping.tsv"
-OVERALL_MULTIMAPPING_PLOT="${PLOTS_DIR}/multimapping.png"
+OVERALL_SINGLE_MAPPING_FILE="${PLOTS_DIR}/multimapping.tsv"
+OVERALL_SINGLE_MAPPING_PLOT="${PLOTS_DIR}/multimapping.png"
 
 for REGION in `ls ${STATS_DIR}`
 do
@@ -42,14 +42,14 @@ do
     # We have intermediate data files for plotting from
     MAPPING_FILE="${PLOTS_DIR}/mapping.${REGION}.tsv"
     MAPPING_PLOT="${PLOTS_DIR}/mapping.${REGION}.png"
-    MULTIMAPPING_FILE="${PLOTS_DIR}/multimapping.${REGION}.tsv"
-    MULTIMAPPING_PLOT="${PLOTS_DIR}/multimapping.${REGION}.png"
+    SINGLE_MAPPING_FILE="${PLOTS_DIR}/singlemapping.${REGION}.tsv"
+    SINGLE_MAPPING_PLOT="${PLOTS_DIR}/singlemapping.${REGION}.png"
     RUNTIME_FILE="${PLOTS_DIR}/runtime.${REGION}.tsv"
     RUNTIME_PLOT="${PLOTS_DIR}/runtime.${REGION}.png"
     
     # Make them empty
     :>"${MAPPING_FILE}"
-    :>"${MULTIMAPPING_FILE}"
+    :>"${SINGLE_MAPPING_FILE}"
     :>"${RUNTIME_FILE}"
     
     
@@ -64,20 +64,35 @@ do
             # For each sample run, parse its JSON and add a point to the region
             # TSV for the appropriate graph.
             
+            # We care about single-mapped reads, multi- mapped reads, unmapped
+            # reads
+            
             # First build the path to the JSON file to look at
             JSON_FILE="${STATS_DIR}/${REGION}/${GRAPH_NAME}/${STATS_FILE}"
+            
+            # How many reads have any good mapping?
+            # We need the 0 + in case there are no sufficiently good mappings
+            TOTAL_MAPPED=`cat "${JSON_FILE}" | jq -r '(0 + .primary_mismatches."0" + .primary_mismatches."1" + .primary_mismatches."2")'`
+            
+            # How many have good secondary mappings? This is a subset of the
+            # above.
+            TOTAL_MULTIMAPPED=`cat "${JSON_FILE}" | jq -r '(0 + .secondary_mismatches."0" + .secondary_mismatches."1" + .secondary_mismatches."2")'`
+            
+            # How many reads are there?
+            TOTAL_READS=`cat "${JSON_FILE}" | jq -r '.total_reads'`
+            
+            # Do some math
+            PORTION_SINGLE_MAPPED=`echo "(${TOTAL_MAPPED} - ${TOTAL_MULTIMAPPED})/${TOTAL_READS}" | bc -l`
+            PORTION_MAPPED=`echo "${TOTAL_MAPPED}/${TOTAL_READS}" | bc -l`
+            PORTION_UNMAPPED=`echo "1 - ${TOTAL_MAPPED}/${TOTAL_READS}" | bc -l`
             
             # We need to account for the well-mapped/well-multimapped identity thresholds
             
             # First: portion mapped with <=2 mismatches out of 100 expected length
-            printf "${GRAPH_NAME}\t" >> "${MAPPING_FILE}"
-            # We need the 0 + in case there are no sufficiently good mappings
-            cat "${JSON_FILE}" | jq -r '(0 + .primary_mismatches."0" + .primary_mismatches."1" + .primary_mismatches."2") / .total_reads' >> "${MAPPING_FILE}"
-            
-            # Next: portion NOT multimapped with <=2 mismatches out of 100 expected length
-            printf "${GRAPH_NAME}\t" >> "${MULTIMAPPING_FILE}"
-            # We need the 0 + in case there are no sufficiently good mappings
-            cat "${JSON_FILE}" | jq -r '1 - ((0 + .secondary_mismatches."0" + .secondary_mismatches."1" + .secondary_mismatches."2") / .total_reads)' >> "${MULTIMAPPING_FILE}"
+            printf "${GRAPH_NAME}\t${PORTION_MAPPED}\n" >> "${MAPPING_FILE}"
+
+            # Next: portion single mapped
+            printf "${GRAPH_NAME}\t${PORTION_SINGLE_MAPPED}\n" >> "${SINGLE_MAPPING_FILE}"
             
             # Next: runtime in seconds
             printf "${GRAPH_NAME}\t" >> "${RUNTIME_FILE}"
@@ -86,15 +101,15 @@ do
     done
     
     ./boxplot.py "${MAPPING_FILE}" \
-        --title "$(printf "Well-mapped (<=2 mismatches)\nreads in ${REGION^^}")" \
-        --x_label "Graph" --y_label "Portion Well-mapped" --save "${MAPPING_PLOT}" \
+        --title "$(printf "Mapped (<=2 mismatches)\nreads in ${REGION^^}")" \
+        --x_label "Graph" --y_label "Portion mapped" --save "${MAPPING_PLOT}" \
         --x_sideways \
         "${PLOT_PARAMS[@]}" \
         --font_size 20 --dpi 90
         
-    ./boxplot.py "${MULTIMAPPING_FILE}" \
-        --title "$(printf "Not-well-multimapped\n(>2 mismatches or unmultimapped)\nreads in ${REGION^^}")" \
-        --x_label "Graph" --y_label "Portion not-well-multimapped" --save "${MULTIMAPPING_PLOT}" \
+    ./boxplot.py "${SINGLE_MAPPING_FILE}" \
+        --title "$(printf "Single-mapped (<=2 mismatches)\nreads in ${REGION^^}")" \
+        --x_label "Graph" --y_label "Portion single-mapped" --save "${SINGLE_MAPPING_PLOT}" \
         --x_sideways \
         "${PLOT_PARAMS[@]}" \
         --font_size 20 --dpi 90
@@ -110,19 +125,19 @@ done
 
 # Aggregate the overall files
 cat "${PLOTS_DIR}"/mapping.*.tsv > "${OVERALL_MAPPING_FILE}"
-cat "${PLOTS_DIR}"/multimapping.*.tsv > "${OVERALL_MULTIMAPPING_FILE}"
+cat "${PLOTS_DIR}"/singlemapping.*.tsv > "${OVERALL_SINGLE_MAPPING_FILE}"
 
 # Make the overall plots
 ./boxplot.py "${OVERALL_MAPPING_FILE}" \
-    --title "$(printf "Well-mapped\n(<=2 mismatches)\nreads")" \
-    --x_label "Graph" --y_label "Portion Well-mapped" --save "${OVERALL_MAPPING_PLOT}" \
+    --title "$(printf "Mapped (<=2 mismatches)\nreads")" \
+    --x_label "Graph" --y_label "Portion mapped" --save "${OVERALL_MAPPING_PLOT}" \
     --x_sideways \
     "${PLOT_PARAMS[@]}" \
     --font_size 20 --dpi 90
-        
-./boxplot.py "${OVERALL_MULTIMAPPING_FILE}" \
-    --title "$(printf "Not-well-multimapped\n(>2 mismatches or unmultimapped)\nreads")" \
-    --x_label "Graph" --y_label "Portion not-well-multimapped" --save "${OVERALL_MULTIMAPPING_PLOT}" \
+
+./boxplot.py "${OVERALL_SINGLE_MAPPING_FILE}" \
+    --title "$(printf "Single-mapped (<=2 mismatches)\nreads")" \
+    --x_label "Graph" --y_label "Portion single-mapped" --save "${OVERALL_SINGLE_MAPPING_PLOT}" \
     --x_sideways \
     "${PLOT_PARAMS[@]}" \
     --font_size 20 --dpi 90

@@ -291,6 +291,15 @@ class IOStore(object):
         
         raise NotImplementedError()
         
+    def exists(self, path):
+        """
+        Returns true if the given input or output file exists in the store
+        already.
+        
+        """
+        
+        raise NotImplementedError()
+        
     @staticmethod
     def get(store_string):
         """
@@ -414,6 +423,15 @@ class FileIOStore(IOStore):
         
         # These are small so we just make copies
         shutil.copy2(local_path, real_output_path)
+        
+    def exists(self, path):
+        """
+        Returns true if the given input or output file exists in the file system
+        already.
+        
+        """
+        
+        return os.path.exists(path)
             
 class AzureIOStore(IOStore):
     """
@@ -587,6 +605,37 @@ class AzureIOStore(IOStore):
         # TODO: catch no container error here, make the container, and retry
         self.connection.put_block_blob_from_path(self.container_name,
             self.name_prefix + output_path, local_path)
+            
+    def exists(self, path):
+        """
+        Returns true if the given input or output file exists in Azure already.
+        
+        """
+        
+        self.__connect()
+        
+        marker = None
+        
+        while True:
+        
+            # Get the results from Azure.
+            result = self.connection.list_blobs(self.container_name, 
+                prefix=path, marker=marker)
+                
+            for blob in result:
+                # Look at each blob
+                
+                if blob.name == path:
+                    # Found it
+                    return True
+                
+            # Save the marker
+            marker = result.next_marker
+                
+            if not marker:
+                break 
+        
+        return False
 
 ###END TOILLIB
 
@@ -796,15 +845,21 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
     for sample in input_samples:
         # Split out over each sample
         
-        RealTimeLogger.get().info("Queueing alignment of {} to {} {}".format(
-            sample, graph_name, region))
-    
         # For each sample, know the FQ name
         sample_fastq = "{}/{}/{}.bam.fq".format(region_dir, sample, sample)
         
         # And know where we're going to put the output
         alignment_file_key = "{}/{}.gam".format(alignment_dir, sample)
         stats_file_key = "{}/{}.json".format(stats_dir, sample)
+        
+        if out_store.exists(stats_file_key):
+            # This is already done.
+            RealTimeLogger.get().info("Skipping completed alignment of "
+                "{} to {} {}".format(sample, graph_name, region))
+            continue
+        
+        RealTimeLogger.get().info("Queueing alignment of {} to {} {}".format(
+            sample, graph_name, region))
     
         # Go and bang that input fastq against the correct indexed graph.
         # Its output will go to the right place in the output store.
