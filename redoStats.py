@@ -59,7 +59,7 @@ for line in sys.stdin:
                     else "nothing"))
                     
                 # Correct it to be primary
-                alignment.set("is_secondary", False)
+                alignment["is_secondary"] = False
                 
         
         if alignment.get("is_secondary", False):
