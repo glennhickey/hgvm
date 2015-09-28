@@ -195,7 +195,7 @@ def compute_linear_variants(job, input_gam, options):
             #todo: specifying fasta causing crash on some data.  maybe mismatch?
             #run("samtools mpileup -u -t DP -f {} {} | bcftools view -O v - > {}".format(
             #    fasta_path,
-            run("samtools mpileup -u -v -t DP {} > {}".format(
+            run("samtools mpileup -u -v -I -t DP {} > {}".format(
                 surject_path,
                 out_vcf_path))
 
