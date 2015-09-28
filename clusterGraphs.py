@@ -72,18 +72,18 @@ def draw_len(weight):
     """ actual weights are between 0 and 1 but vary by many orders of
     magnitude.  try to map them into something for graphviz edge length hint
     """
-    if weight < 0.00001:
-        return 0.25
+    if weight < 0.0001:
+        return .5
     elif weight < 0.001:
-        return 5
-    elif weight < 0.01:
         return .75
+    elif weight < 0.01:
+        return 1.
     elif weight < 0.1:
-        return 1
-    elif weight < 0.5:
         return 1.25
+    elif weight < 0.2:
+        return 1.6
     else:
-        return 1.5
+        return 1.6 + weight
 
 def cluster_comparisons(options):
     """ scape the comparison files into a distance matrix, cluster into
@@ -163,7 +163,7 @@ def cluster_comparisons(options):
             node["width"] = 0.001
             node["height"] = 0.001
         else:
-            node["fontsize"] = 10
+            node["fontsize"] = 14
     for edge_id in nxgraph.edges():
         edge = nxgraph.edge[edge_id[0]][edge_id[1]]
         # in graphviz, weight means something else, so make it a label
@@ -175,7 +175,7 @@ def cluster_comparisons(options):
             weight = 0.
         edge["weight"] = None
         edge["label"] = "{0:.3g}".format(float(weight) * 100.)
-        edge["fontsize"] = 8
+        edge["fontsize"] = 10
         edge["len"] = draw_len(weight)
     nx.write_dot(nxgraph, tree_path(options).replace("newick", "dot"))
     
