@@ -620,7 +620,7 @@ class AzureIOStore(IOStore):
         
             # Get the results from Azure.
             result = self.connection.list_blobs(self.container_name, 
-                prefix=path, marker=marker)
+                prefix=self.name_prefix + path, marker=marker)
                 
             for blob in result:
                 # Look at each blob
