@@ -52,11 +52,11 @@ for line in sys.stdin:
                 
                 # This is a secondary alignment without a corresponding primary
                 # alignment
-                sys.stderr.write("{} secondary alignment comes after "
-                    "alignment of {} instead of corresponding primary "
-                    "alignment\n".format(alignment.get("name"), 
-                    last_alignment.get("name") if last_alignment is not None 
-                    else "nothing"))
+                #sys.stderr.write("{} secondary alignment comes after "
+                #    "alignment of {} instead of corresponding primary "
+                #    "alignment\n".format(alignment.get("name"), 
+                #    last_alignment.get("name") if last_alignment is not None 
+                #    else "nothing"))
                     
                 # Correct it to be primary
                 alignment["is_secondary"] = False

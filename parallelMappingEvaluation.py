@@ -949,6 +949,8 @@ def run_alignment(job, options, bin_dir_id, region, index_dir_id,
         "run_time": run_time
     }
         
+    last_alignment = None
+        
     for line in view.stdout:
         # Parse the alignment JSON
         alignment = json.loads(line)
@@ -978,6 +980,19 @@ def run_alignment(job, options, bin_dir_id, region, index_dir_id,
                 # It's a multimapping. We can have max 1 per read, so it's a
                 # multimapped read.
                 
+                if (last_alignment is None or 
+                    last_alignment.get("name") != alignment.get("name") or 
+                    last_alignment.get("is_secondary", False)):
+                
+                    # This is a secondary alignment without a corresponding primary
+                    # alignment (which would have to be right before it given the
+                    # way vg dumps buffers
+                    raise RuntimeError("{} secondary alignment comes after "
+                        "alignment of {} instead of corresponding primary "
+                        "alignment\n".format(alignment.get("name"), 
+                        last_alignment.get("name") if last_alignment is not None 
+                        else "nothing"))
+                
                 # Log its stats as multimapped
                 stats["total_multimapped"] += 1
                 stats["secondary_scores"][score] += 1
@@ -998,6 +1013,9 @@ def run_alignment(job, options, bin_dir_id, region, index_dir_id,
             
             # Count the read by its primary alignment
             stats["total_reads"] += 1
+            
+        # Save the alignment for checking for wayward secondaries
+        last_alignment = alignment
                 
     with open(stats_file, "w") as stats_handle:
         # Save the stats as JSON
