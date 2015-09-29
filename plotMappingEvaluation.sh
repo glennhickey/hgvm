@@ -96,7 +96,7 @@ do
             
             # Next: runtime in seconds
             printf "${GRAPH_NAME}\t" >> "${RUNTIME_FILE}"
-            cat "${JSON_FILE}" | jq -r '.run_time' >> "${RUNTIME_FILE}"
+            cat "${JSON_FILE}" | jq -r '.run_time' | sed 's/null/nan/g' >> "${RUNTIME_FILE}"
         done
     done
     
@@ -105,21 +105,21 @@ do
         --x_label "Graph" --y_label "Portion mapped" --save "${MAPPING_PLOT}" \
         --x_sideways \
         "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90
+        --font_size 20 --dpi 90 --no_n
         
     ./boxplot.py "${SINGLE_MAPPING_FILE}" \
         --title "$(printf "Single-mapped (<=2 mismatches)\nreads in ${REGION^^}")" \
         --x_label "Graph" --y_label "Portion single-mapped" --save "${SINGLE_MAPPING_PLOT}" \
         --x_sideways \
         "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90
+        --font_size 20 --dpi 90 --no_n
         
     ./boxplot.py "${RUNTIME_FILE}" \
         --title "$(printf "Aligner runtime\n in ${REGION^^}")" \
         --x_label "Graph" --y_label "Runtime per sample (seconds)" --save "${RUNTIME_PLOT}" \
         --x_sideways \
         "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90
+        --font_size 20 --dpi 90 --no_n
     
 done
 
@@ -133,12 +133,12 @@ cat "${PLOTS_DIR}"/singlemapping.*.tsv > "${OVERALL_SINGLE_MAPPING_FILE}"
     --x_label "Graph" --y_label "Portion mapped" --save "${OVERALL_MAPPING_PLOT}" \
     --x_sideways \
     "${PLOT_PARAMS[@]}" \
-    --font_size 20 --dpi 90
+    --font_size 20 --dpi 90 --no_n
 
 ./boxplot.py "${OVERALL_SINGLE_MAPPING_FILE}" \
     --title "$(printf "Single-mapped (<=2 mismatches)\nreads")" \
     --x_label "Graph" --y_label "Portion single-mapped" --save "${OVERALL_SINGLE_MAPPING_PLOT}" \
     --x_sideways \
     "${PLOT_PARAMS[@]}" \
-    --font_size 20 --dpi 90
+    --font_size 20 --dpi 90 --no_n
 
