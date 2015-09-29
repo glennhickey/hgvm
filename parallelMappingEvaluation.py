@@ -821,7 +821,8 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
     # TODO: support both indexing modes
     RealTimeLogger.get().info("Indexing {}".format(graph_filename))
     subprocess.check_call(["{}/vg".format(bin_dir), "index", "-s", "-k",
-        str(options.kmer_size), "-e", str(options.edge_max), graph_filename])
+        str(options.kmer_size), "-e", str(options.edge_max),
+        "-t", str(job.cores), graph_filename])
         
     # Now save the indexed graph directory to the file store. It can be cleaned
     # up since only our children use it.
