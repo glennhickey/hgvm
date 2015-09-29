@@ -910,7 +910,8 @@ def run_alignment(job, options, bin_dir_id, region, index_dir_id,
         
         # Plan out what to run
         vg_parts = ["{}/vg".format(bin_dir), "map", "-f", fastq_file, "-i",
-            "-n3", "-M2", "-k", str(options.kmer_size), graph_file]
+            "-n3", "-M2", "-t", str(job.cores), "-k", str(options.kmer_size),
+            graph_file]
         
         RealTimeLogger.get().info("Running VG: {}".format(" ".join(vg_parts)))
         
