@@ -16,7 +16,7 @@ all output will be in the variants/ folder.
 import argparse, sys, os, os.path, random, subprocess, shutil, itertools, glob
 import doctest, re, json, collections, time, timeit, string
 from toil.job import Job
-from parallelMappingEvaluation import RealTimeLogger, robust_makedirs
+from toillib import RealTimeLogger, robust_makedirs
 
 def parse_args(args):
     parser = argparse.ArgumentParser(description=__doc__, 
@@ -91,6 +91,12 @@ def alignment_map_tag(alignment_path, options):
     assert len(path) > 1
     return path[-2]
 
+def alignment_region_tag(alignment_path, options):
+    """ say alignment is bla/gcsa/real/camel-brca1.gam, then return brca1
+    """
+    name = os.path.splitext(os.path.basename(alignment_path))[0]
+    return name.split("-")[1]
+
 def out_dir(alignment_path, options):
     """ get directory to put output corresponding to input file
     """
@@ -144,6 +150,8 @@ def run(cmd, stdout = sys.stdout, stderr = sys.stderr):
     """ run command in shell and barf if it doesn't work
     (copied from system() in sonlib.bioio
     """
+    RealTimeLogger.get().info("RUN: {}".format(cmd))
+
     sts = subprocess.call(cmd, shell=True, bufsize=-1,
                           stdout=stdout, stderr=stderr)
     if sts != 0:

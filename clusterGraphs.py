@@ -13,7 +13,7 @@ matplotlib.use('Agg')
 import pylab
 import networkx as nx
 from toil.job import Job
-from parallelMappingEvaluation import RealTimeLogger, robust_makedirs
+from toillib import RealTimeLogger, robust_makedirs
 
 def parse_args(args):
     parser = argparse.ArgumentParser(description=__doc__, 
@@ -29,6 +29,8 @@ def parse_args(args):
                         help="directory to which results will be written.")
     parser.add_argument("--kmer", type=int, default=10,
                         help="kmer size for comparison")
+    parser.add_argument("--edge_max", type=int, default=0,
+                        help="edge-max parameter for vg kmer index")    
     parser.add_argument("--overwrite", action="store_true", default=False,
                         help="overwrite existing files")                        
     args = args[1:]
@@ -48,8 +50,12 @@ def compute_kmer_index(job, graph, options):
     out_index_path = index_path(graph, options)
     do_index = options.overwrite or not os.path.exists(out_index_path)
 
+    index_opts = "-k {}".format(options.kmer)
+    if options.edge_max > 0:
+        index_opts += " -e {}".format(options.edge_max)
+
     if do_index:
-        os.system("vg index -k {} {}".format(options.kmer, graph))
+        os.system("vg index {} {}".format(index_opts, graph))
 
 def comp_path(graph1, graph2, options):
     """ get the path for json output of vg compare
@@ -163,7 +169,7 @@ def cluster_comparisons(options):
             node["width"] = 0.001
             node["height"] = 0.001
         else:
-            node["fontsize"] = 14
+            node["fontsize"] = 18
     for edge_id in nxgraph.edges():
         edge = nxgraph.edge[edge_id[0]][edge_id[1]]
         # in graphviz, weight means something else, so make it a label
@@ -175,7 +181,7 @@ def cluster_comparisons(options):
             weight = 0.
         edge["weight"] = None
         edge["label"] = "{0:.3g}".format(float(weight) * 100.)
-        edge["fontsize"] = 10
+        edge["fontsize"] = 14
         edge["len"] = draw_len(weight)
     nx.write_dot(nxgraph, tree_path(options).replace("newick", "dot"))
     
@@ -221,7 +227,7 @@ def main(args):
     
     options = parse_args(args) 
     
-    RealTimeLogger.start_master(options)
+    RealTimeLogger.start_master()
 
     for graph in options.graphs:
         if os.path.splitext(graph)[1] != ".vg":
