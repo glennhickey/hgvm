@@ -13,7 +13,7 @@ OPTS="--maxCores 20 --kmer 27 --edge_max 7"
 
 mkdir -f $OUT_DIR
 
-for i in brca1 brca2 sma lrc_kr brc
+for i in brca1 brca2 sma lrc_kr mhc
 do
 	 rm -rf blon123 ; ./clusterGraphs.py ./blon123 ${GRAPHS}/*${i}*.vg ${VARIANTS}/*${i}*.vg ${OUT_DIR}/${i} ${OPTS}
 done
