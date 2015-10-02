@@ -200,11 +200,8 @@ def compute_linear_variants(job, input_gam, options):
             # create pileup in bcf using samtools
             # http://samtools.sourceforge.net/mpileup.shtml
             assert os.path.isfile(fasta_path)
-            #todo: specifying fasta causing crash on some data.  maybe mismatch?
-            #run("samtools mpileup -u -t DP -f {} {} | bcftools view -O v - > {}".format(
-            #    fasta_path,
-            run("samtools mpileup -u -v -I -t DP {} > {}".format(
-                surject_path,
+            run("samtools mpileup -u -t DP -f {} {} | bcftools call -m -V indels - > {}".format(
+                fasta_path,
                 out_vcf_path))
 
             # make compressed index
@@ -239,8 +236,8 @@ def compute_vg_variants(job, input_gam, options):
 
     if do_call:
         robust_makedirs(os.path.dirname(out_call_path))
-        run("vg call {} > {}".format(out_pileup_path,
-                                     out_call_path))
+        run("vg call {} -r 0.001 -d 65 -e 115 -s 30 > {}".format(out_pileup_path,
+                                                                 out_call_path))
 
     if do_aug:
         robust_makedirs(os.path.dirname(out_augmented_vg_path))
