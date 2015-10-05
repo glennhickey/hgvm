@@ -678,6 +678,8 @@ def parse_args(args):
     parser.add_argument("--bin_url",
         default="https://hgvm.blob.core.windows.net/hgvm-bin",
         help="URL to download sg2vg and vg binaries from, without Docker")
+    parser.add_argument("--overwrite", default=False, action="store_true",
+        help="overwrite existing result files")
     
     # The command line arguments start with the program name, which we don't
     # want to treat as an argument for argparse. So we remove it.
@@ -766,13 +768,48 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
     bin_dir = "{}/bin".format(job.fileStore.getLocalTempDir())
     read_global_directory(job.fileStore, bin_dir_id, bin_dir)
     
-    
     # Get graph basename (last URL component) from URL
     basename = re.match(".*/(.*)/$", url).group(1)
         
     # Get graph name (without region and its associated dash) from basename
     graph_name = basename.replace("-{}".format(region), "").replace(
         "{}-".format(region), "")
+    
+    # Where do we look for samples for this region in the input?
+    region_dir = region.upper()
+    
+    # What samples do we do? List input sample names up to the given limit.
+    input_samples = list(sample_store.list_input_directory(
+        region_dir))[:options.sample_limit]
+    
+    # Work out the directory for the alignments to be dumped in in the output
+    alignment_dir = "alignments/{}/{}".format(region, graph_name)
+    
+    # Also for statistics
+    stats_dir = "stats/{}/{}".format(region, graph_name)
+    
+    # What samples haven't been done yet and need doing
+    samples_to_run = []
+    
+    for sample in input_samples:
+        # Split out over each sample
+        
+        # What's the file that has to exist for us to not re-run it?
+        stats_file_key = "{}/{}.json".format(stats_dir, sample)
+        
+        if options.overwrite or out_store.exists(stats_file_key):
+            # This is already done.
+            RealTimeLogger.get().info("Skipping completed alignment of "
+                "{} to {} {}".format(sample, graph_name, region))
+            continue
+        else:
+            # We need to run this sample
+            samples_to_run.append(sample)
+            
+    if len(samples_to_run) == 0:
+        # Don't bother indexing the graph if all the samples are done.
+        RealTimeLogger.get().info("Nothing to align to {}".format(basename))
+        return
     
     # Make the real URL with the version
     versioned_url = url + options.server_version
@@ -829,22 +866,8 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
     index_dir_id = write_global_directory(job.fileStore, graph_dir,
         cleanup=True)
                     
-    # Where do we look for samples for this region in the input?
-    region_dir = region.upper()
-    
-    # What samples do we do? List input sample names up to the given limit.
-    input_samples = list(sample_store.list_input_directory(
-        region_dir))[:options.sample_limit]
-    
-    # Work out the directory for the alignments to be dumped in in the output
-    alignment_dir = "alignments/{}/{}".format(region, graph_name)
-    
-    # Also for statistics
-    stats_dir = "stats/{}/{}".format(region, graph_name)
-    
-    
-    for sample in input_samples:
-        # Split out over each sample
+    for sample in samples_to_run:
+        # Split out over each sample that needs to be run
         
         # For each sample, know the FQ name
         sample_fastq = "{}/{}/{}.bam.fq".format(region_dir, sample, sample)
@@ -852,12 +875,6 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
         # And know where we're going to put the output
         alignment_file_key = "{}/{}.gam".format(alignment_dir, sample)
         stats_file_key = "{}/{}.json".format(stats_dir, sample)
-        
-        if out_store.exists(stats_file_key):
-            # This is already done.
-            RealTimeLogger.get().info("Skipping completed alignment of "
-                "{} to {} {}".format(sample, graph_name, region))
-            continue
         
         RealTimeLogger.get().info("Queueing alignment of {} to {} {}".format(
             sample, graph_name, region))
