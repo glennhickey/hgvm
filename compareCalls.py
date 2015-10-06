@@ -114,7 +114,7 @@ def compute_kmer_index(job, graph, options):
     out_index_path = index_path(graph, options)
     do_index = options.overwrite or not os.path.exists(out_index_path)
 
-    index_opts = "-s -k {}".format(options.kmer)
+    index_opts = "-s -k {} -t {}".format(options.kmer, options.vg_cores)
     if options.edge_max > 0:
         index_opts += " -e {}".format(options.edge_max)
     

@@ -206,6 +206,7 @@ def compute_linear_variants(job, input_gam, options):
         do_vg = do_vcf or not os.path.isfile(out_vg_path)
 
         if do_surject:
+            robust_makedirs(os.path.dirname(surject_path))
             prefix_path = temp_path(options, ".prefix")
             # surject to reference path (name hardcoded to ref for now)
             run("vg surject -d {} -p {} -b {} -t {} | samtools sort -o - {}> {}".format(
@@ -224,7 +225,8 @@ def compute_linear_variants(job, input_gam, options):
             # create pileup in bcf using samtools
             # http://samtools.sourceforge.net/mpileup.shtml
             assert os.path.isfile(fasta_path)
-            run("samtools mpileup -u -t DP -f {} {} | bcftools call -m -V indels - > {}".format(
+            robust_makedirs(os.path.dirname(out_vcf_path))
+            run("samtools mpileup -I -u -t DP -f {} {} | bcftools call -m -V indels - > {}".format(
                 fasta_path,
                 surject_path,
                 out_vcf_path))
@@ -235,6 +237,7 @@ def compute_linear_variants(job, input_gam, options):
 
         if do_vg:
             # and convert back to vg...
+            robust_makedirs(os.path.dirname(out_vg_path))
             run("vg construct -v {}.gz -r {} -t {} > {}".format(out_vcf_path, fasta_path,
                                                                 options.vg_cores, out_vg_path))
             
