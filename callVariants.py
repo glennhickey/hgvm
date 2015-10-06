@@ -3,11 +3,19 @@
 Generates variant calls from read alignments in various ways for comparison. Input will be set of GAM alignemnts to process.  Directory structure must be consistent with Adam's scripts.  ie
 
 alignments stored like this:
-  alignments/<mapper>/<reads>/<graph-name>.gam
+  alignments/brca1/cactus/NA19240.gam
 
-graphs stored like this:
-  graphs/<graph-name>.vg
-  graphs/<graph-name>.vg.index
+so:
+  <alignments dir>/<region>/<graph method>/<sample>.gam
+
+The graphs must also be accessible:
+
+  graphs/cactus-brca1.vg
+
+so:
+  <graphs dir>/<graph method>-<region>.vg
+
+note: debruin is exception where -k63 tag gets tacked on at end (treated as special case)
 
 all output will be in the variants/ folder.
 
@@ -40,6 +48,8 @@ def parse_args(args):
                         help="path to search for reference sequences. expects "
                         "references to be in <fa_path>/BRCA1/ref.fa, etc. "
                         " [TODO: support different ref versions?]" )
+    parser.add_argument("--vg_cores", type=int, default=1,
+                        help="number of cores to give to vg commands")
     
     args = args[1:]
         
@@ -53,13 +63,20 @@ def temp_path(options, prefix="tmp", ext="", length=6):
     tag = "".join([random.choice(
         string.ascii_uppercase + string.digits) for i in xrange(length)])
     return os.path.join(tempdir, prefix + tag + ext)
-    
+
+
 def graph_path(alignment_path, options):
     """ get the graph corresponding to a gam
     """
-    name, ext = os.path.splitext(os.path.basename(alignment_path))
-    assert ext == ".gam"
-    return os.path.join(options.graph_dir, name + ".vg")
+    region = alignment_region_tag(alignment_path, options)
+    graph = alignment_graph_tag(alignment_path, options)
+    if graph.find("debruijn") == 0:
+        assert graph.find("-") == 8
+        tag = graph[8:]
+        graph = "debruijn"
+    else:
+        tag = ""
+    return os.path.join(options.graph_dir, "{}-{}{}.vg".format(graph, region, tag))
     
 def index_path(graph_path, options):
     """ get index corresponding to a graph
@@ -70,39 +87,45 @@ def ref_path(alignment_path, options):
     """ get the fasta file corresponding to the reference, assuming region
     name comes after 1st dash in filename
     """
-    name, ext = os.path.splitext(os.path.basename(alignment_path))
-    region = name.split("-")[1].upper()
+    region = alignment_region_tag(alignment_path, options)
+    region = region.upper()
     # NOTE: this logic only supports one reference (ie grchg38), so won't work
     # for simons data.
     return os.path.join(options.fa_path, region, "ref.fa")
 
-
 def alignment_read_tag(alignment_path, options):
     """ say alignment is bla/gcsa/real/camel-brca1.gam, then return real
     """
-    path = os.path.dirname(alignment_path).split("/")
-    assert len(path) > 1
-    return path[-1]
+    return "real"
 
 def alignment_map_tag(alignment_path, options):
     """ say alignment is bla/gcsa/real/camel-brca1.gam, then return gcsa
     """
-    path = os.path.dirname(alignment_path).split("/")
-    assert len(path) > 1
-    return path[-2]
+    return "kmer"
 
 def alignment_region_tag(alignment_path, options):
     """ say alignment is bla/gcsa/real/camel-brca1.gam, then return brca1
     """
-    name = os.path.splitext(os.path.basename(alignment_path))[0]
-    return name.split("-")[1]
+    region = alignment_path.split("/")[-3]
+    assert region in ["brca1", "brca2", "cenx", "lrc_kir", "sma", "mhc"]
+    return region
+
+def alignment_graph_tag(gam_path, options):
+    """ extract the graph method name from gam path
+    """
+    return gam_path.split("/")[-2]
+
+def alignment_sample_tag(gam_path, options):
+    """ get the sample name from gam path
+    """
+    return os.path.splitext(os.path.basename(gam_path))[0]
 
 def out_dir(alignment_path, options):
     """ get directory to put output corresponding to input file
     """
     return os.path.join(options.out_dir,
-                        alignment_map_tag(alignment_path, options),
-                        alignment_read_tag(alignment_path, options))
+                        alignment_region_tag(alignment_path, options),
+                        alignment_graph_tag(alignment_path, options))
 
 def pileup_path(alignment_path, options, tag=""):
     """ get output pileup name from input gam
@@ -185,10 +208,11 @@ def compute_linear_variants(job, input_gam, options):
         if do_surject:
             prefix_path = temp_path(options, ".prefix")
             # surject to reference path (name hardcoded to ref for now)
-            run("vg surject -d {} -p {} -b {} | samtools sort -o - {}> {}".format(
+            run("vg surject -d {} -p {} -b {} -t {} | samtools sort -o - {}> {}".format(
                 input_index_path,
                 "ref",
                 input_gam,
+                options.vg_cores,
                 prefix_path,
                 surject_path))
             run("rm -f {}".format(prefix_path))
@@ -202,15 +226,17 @@ def compute_linear_variants(job, input_gam, options):
             assert os.path.isfile(fasta_path)
             run("samtools mpileup -u -t DP -f {} {} | bcftools call -m -V indels - > {}".format(
                 fasta_path,
+                surject_path,
                 out_vcf_path))
 
             # make compressed index
-            run("bgzip {}".format(out_vcf_path))
-            run("tabix -p vcf {}.gz".format(out_vcf_path))
+            run("bgzip -f {}".format(out_vcf_path))
+            run("tabix -f -p vcf {}.gz".format(out_vcf_path))
 
         if do_vg:
             # and convert back to vg...
-            run("vg construct -v {}.gz -r {} > {}".format(out_vcf_path, fasta_path, out_vg_path))
+            run("vg construct -v {}.gz -r {} -t {} > {}".format(out_vcf_path, fasta_path,
+                                                                options.vg_cores, out_vg_path))
             
     
 def compute_vg_variants(job, input_gam, options):
@@ -230,19 +256,22 @@ def compute_vg_variants(job, input_gam, options):
             input_graph_path,
             input_gam))
         robust_makedirs(os.path.dirname(out_pileup_path))
-        run("vg pileup {} {} > {}".format(input_graph_path,
-                                          input_gam,
-                                          out_pileup_path))
+        run("vg pileup {} {} -t {} > {}".format(input_graph_path,
+                                                input_gam,
+                                                options.vg_cores,
+                                                out_pileup_path))
 
     if do_call:
         robust_makedirs(os.path.dirname(out_call_path))
-        run("vg call {} -r 0.001 -d 65 -e 115 -s 30 > {}".format(out_pileup_path,
-                                                                 out_call_path))
+        run("vg call {} -r 0.001 -d 65 -e 115 -s 30 -t {} > {}".format(out_pileup_path,
+                                                                       options.vg_cores,
+                                                                       out_call_path))
 
     if do_aug:
         robust_makedirs(os.path.dirname(out_augmented_vg_path))
-        run("vg mod {} -i {} > {}".format(input_graph_path,
+        run("vg mod {} -i {} -t {} > {}".format(input_graph_path,
                                           out_call_path,
+                                          options.vg_cores,
                                           out_augmented_vg_path))
 
 def call_variants(job, options):
@@ -250,9 +279,9 @@ def call_variants(job, options):
     """
     for input_gam in options.in_gams:
         job.addChildJobFn(compute_vg_variants, input_gam, options,
-                          cores=1)
+                          cores=options.vg_cores)
         job.addChildJobFn(compute_linear_variants, input_gam, options,
-                          cores=1)
+                          cores=options.vg_cores)
     
     
 def main(args):

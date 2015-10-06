@@ -8,7 +8,7 @@ import doctest, re, json, collections, time, timeit, string
 from operator import sub
 from toil.job import Job
 from toillib import RealTimeLogger, robust_makedirs
-from callVariants import call_path, augmented_vg_path, alignment_read_tag, alignment_map_tag
+from callVariants import call_path, augmented_vg_path, alignment_region_tag, alignment_graph_tag
 from callVariants import graph_path, index_path, augmented_vg_path, linear_vg_path, linear_vcf_path
 from callVariants import alignment_region_tag
 
@@ -34,10 +34,12 @@ def parse_args(args):
                         help="extension to find input grpah index")
     parser.add_argument("--overwrite", action="store_true", default=False,
                         help="overwrite files if dont exist")
-    parser.add_argument("--kmer", type=int, default=10,
+    parser.add_argument("--kmer", type=int, default=27,
                         help="kmer size for comparison")
-    parser.add_argument("--edge_max", type=int, default=0,
+    parser.add_argument("--edge_max", type=int, default=7,
                         help="edge-max parameter for vg kmer index")
+    parser.add_argument("--vg_cores", type=int, default=1,
+                        help="number of cores to give to vg commands")    
                         
     args = args[1:]
         
@@ -78,8 +80,12 @@ def baseline_path(gam, options):
     """ put together path for baseline graph 
     """
     region = alignment_region_tag(gam, options)
+    if options.baseline.find("debruijn") == 0:
+        dbtag = options.baseline[8:]
+    else:
+        dbtag = ""
     return os.path.join(options.graph_dir,
-                        "{}-{}.vg".format(options.baseline, region))
+                        "{}-{}{}.vg".format(options.baseline, region, dbtag))
 
 def comparison_path(baseline, graph, options):
     """ get a unique path, in the temporary folder, for
@@ -89,16 +95,16 @@ def comparison_path(baseline, graph, options):
     bname = os.path.splitext(os.path.basename(baseline))[0]
     gname = os.path.splitext(os.path.basename(graph))[0]
     try:
-        read_tag = alignment_read_tag(graph, options)
+        region_tag = alignment_region_tag(graph, options)
     except:
-        read_tag = ""
+        region_tag = ""
     try:
-        map_tag = alignment_map_tag(graph, options)
+        graph_tag = alignment_graph_tag(graph, options)
     except:
-        map_tag = ""
+        graph_tag = ""
     
     return os.path.join(json_out_path(options), "{}{}{}{}.json".format(
-        bname, map_tag, read_tag, gname))
+        bname, graph_tag, region_tag, gname))
     
 def compute_kmer_index(job, graph, options):
     """ run vg index (if necessary) and vg compare on the input
@@ -127,7 +133,9 @@ def compute_comparison(job, baseline, graph, options):
     do_comp = options.overwrite or not os.path.exists(out_path)
     
     if do_comp:        
-        os.system("vg compare {} {} > {}".format(baseline, graph, out_path))
+        os.system("vg compare {} {} -t {} > {}".format(baseline, graph,
+                                                       min(2, options.vg_cores),
+                                                       out_path))
            
 def count_gam_paths(gam, options):
     """ get number of snps by counting the paths in an alignment. only
@@ -294,14 +302,15 @@ def compute_all_comparisons(job, options):
     """ run vg compare in parallel on all the graphs,
     outputting a json file for each
     """
+    ncores = min(2, options.vg_cores)
     for gam in options.in_gams:
         baseline = baseline_path(gam, options)
         job.addChildJobFn(compute_comparison, baseline,
-                          graph_path(gam, options), options)
+                          graph_path(gam, options), options, cores=ncores)
         job.addChildJobFn(compute_comparison, baseline,
-                          augmented_vg_path(gam, options), options)
+                          augmented_vg_path(gam, options), options, cores=ncores)
         job.addChildJobFn(compute_comparison, baseline,
-                          linear_vg_path(gam, options), options)
+                          linear_vg_path(gam, options), options, cores=ncores)
 
 def compute_all_indexes(job, options):
     """ run everything (root toil job)
@@ -318,17 +327,17 @@ def compute_all_indexes(job, options):
         if not os.path.isfile(baseline):
             raise RuntimeError("baseline {} for gam {} not found".format(baseline, gam))
         if baseline not in baseline_set:
-            job.addChildJobFn(compute_kmer_index, baseline, options, cores=1)
+            job.addChildJobFn(compute_kmer_index, baseline, options, cores=options.vg_cores)
             baseline_set.add(baseline)
         if graph_path(gam, options) != baseline:
-            job.addChildJobFn(compute_kmer_index, graph_path(gam, options), options)
+            job.addChildJobFn(compute_kmer_index, graph_path(gam, options), options, cores=options.vg_cores)
         if augmented_vg_path(gam, options) != baseline:
-            job.addChildJobFn(compute_kmer_index, augmented_vg_path(gam, options), options)
+            job.addChildJobFn(compute_kmer_index, augmented_vg_path(gam, options), options, cores=options.vg_cores)
         if linear_vg_path(gam, options) != baseline:
-            job.addChildJobFn(compute_kmer_index, linear_vg_path(gam, options), options)
+            job.addChildJobFn(compute_kmer_index, linear_vg_path(gam, options), options, cores=options.vg_cores)
 
     # do the comparisons
-    job.addFollowOnJobFn(compute_all_comparisons, options)
+    job.addFollowOnJobFn(compute_all_comparisons, options, cores=1)
 
     
 def main(args):

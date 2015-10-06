@@ -1,7 +1,7 @@
 #!/usr/bin/env python2.7
 """
 Cluster some graphs (using vg compare for pairwise distances) based on their similarity.
-Current implementation : neighbour joining tree using Jaccard distance matrix
+Current implementation : upgma tree using Jaccard distance matrix
 """
 
 import argparse, sys, os, os.path, random, subprocess, shutil, itertools, glob
@@ -27,12 +27,15 @@ def parse_args(args):
                         help="other graph(s) to compare to baseline")
     parser.add_argument("out_dir", type=str,
                         help="directory to which results will be written.")
-    parser.add_argument("--kmer", type=int, default=10,
+    parser.add_argument("--kmer", type=int, default=27,
                         help="kmer size for comparison")
-    parser.add_argument("--edge_max", type=int, default=0,
+    parser.add_argument("--edge_max", type=int, default=7,
                         help="edge-max parameter for vg kmer index")    
     parser.add_argument("--overwrite", action="store_true", default=False,
-                        help="overwrite existing files")                        
+                        help="overwrite existing files")
+    parser.add_argument("--vg_cores", type=int, default=1,
+                        help="number of cores to give to vg commands")    
+                            
     args = args[1:]
 
     return parser.parse_args(args)
@@ -50,7 +53,7 @@ def compute_kmer_index(job, graph, options):
     out_index_path = index_path(graph, options)
     do_index = options.overwrite or not os.path.exists(out_index_path)
 
-    index_opts = "-s -k {}".format(options.kmer)
+    index_opts = "-s -k {} -t {}".format(options.kmer, options.vg_cores)
     if options.edge_max > 0:
         index_opts += " -e {}".format(options.edge_max)
 
@@ -199,7 +202,8 @@ def compute_kmer_comparison(job, graph1, graph2, options):
     
     if do_comp:
         robust_makedirs(os.path.dirname(out_path))        
-        os.system("vg compare {} {} > {}".format(graph1, graph2, out_path))
+        os.system("vg compare {} {} -t {} > {}".format(graph1, graph2,
+                                                       min(options.vg_cores, 2), out_path))
 
 def compute_comparisons(job, options):
     """ run vg compare in parallel on all the graphs,
@@ -208,7 +212,8 @@ def compute_comparisons(job, options):
     for graph1 in options.graphs:
         for graph2 in options.graphs:
             if graph1 <= graph2:
-                job.addChildJobFn(compute_kmer_comparison, graph1, graph2, options)
+                job.addChildJobFn(compute_kmer_comparison, graph1, graph2, options,
+                                  cores=min(options.vg_cores, 2))
 
 def compute_kmer_indexes(job, options):
     """ run everything (root toil job)
@@ -218,10 +223,10 @@ def compute_kmer_indexes(job, options):
     """
     # do all the indexes
     for graph in options.graphs:
-        job.addChildJobFn(compute_kmer_index, graph, options)
+        job.addChildJobFn(compute_kmer_index, graph, options, cores=options.vg_cores)
 
     # do the comparisons
-    job.addFollowOnJobFn(compute_comparisons, options)
+    job.addFollowOnJobFn(compute_comparisons, options, cores=1)
     
 def main(args):
     
