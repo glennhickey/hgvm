@@ -109,7 +109,10 @@ def compute_matrix(options):
     """
     def label_fn(graph):
         if options.avg_samples:
-            return alignment_sample_tag(graph, options)
+            # ex: NA3453456_agumented.vg -> augmented
+            label = "".join(os.path.splitext(os.path.basename(graph))[0].split("_")[1:])
+            assert len(labe) > 0
+            return label
         else:
             return os.path.splitext(os.path.basename(graph))[0]
 
