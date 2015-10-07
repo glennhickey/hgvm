@@ -12,8 +12,11 @@ import matplotlib
 matplotlib.use('Agg')
 import pylab
 import networkx as nx
+from collections import defaultdict
 from toil.job import Job
 from toillib import RealTimeLogger, robust_makedirs
+from heatmap import plotHeatMap
+from callVariants import alignment_sample_tag
 
 def parse_args(args):
     parser = argparse.ArgumentParser(description=__doc__, 
@@ -34,7 +37,9 @@ def parse_args(args):
     parser.add_argument("--overwrite", action="store_true", default=False,
                         help="overwrite existing files")
     parser.add_argument("--vg_cores", type=int, default=1,
-                        help="number of cores to give to vg commands")    
+                        help="number of cores to give to vg commands")
+    parser.add_argument("--avg_samples", action="store_true", default=False,
+                        help="Average samples into mean value")
                             
     args = args[1:]
 
@@ -77,6 +82,11 @@ def tree_path(options):
     """
     return os.path.join(options.out_dir, "tree.newick")
 
+def heatmap_path(options):
+    """ path for heatmap
+    """
+    return os.path.join(options.out_dir, "heatmap.pdf")
+
 def draw_len(weight):
     """ actual weights are between 0 and 1 but vary by many orders of
     magnitude.  try to map them into something for graphviz edge length hint
@@ -94,15 +104,23 @@ def draw_len(weight):
     else:
         return 1.6 + weight
 
-def cluster_comparisons(options):
-    """ scape the comparison files into a distance matrix, cluster into
-    a tree
-    """    
-    mat = dict()
-    for graph in options.graphs:
-        mat[graph] = dict()
+def compute_matrix(options):
+    """ make a distance matrix (dictionary), also write it to file
+    """
+    def label_fn(graph):
+        if options.avg_samples:
+            return alignment_sample_tag(graph, options)
+        else:
+            return os.path.splitext(os.path.basename(graph))[0]
 
-    # make distance matrix in memory
+    # make empty distance matrix and counts table (for mean)
+    mat = dict()
+    counts = dict()
+    for graph in options.graphs:
+        mat[label_fn(graph)] = defaultdict(float)
+        counts[label_fn(graph)] = defaultdict(float)
+            
+    # fill the matrix, summing if two graphs map to same label 
     for graph1 in options.graphs:
         for graph2 in options.graphs:
             if graph1 <= graph2:
@@ -114,27 +132,32 @@ def cluster_comparisons(options):
                         jaccard = 2.
                     else:
                         jaccard = float(j["intersection"]) / float(j["union"])
-                mat[graph1][graph2] = 1. - jaccard
-                mat[graph2][graph1] = 1. - jaccard
+                mat[label_fn(graph1)][label_fn(graph2)] += 1. - jaccard
+                mat[label_fn(graph2)][label_fn(graph1)] += 1. - jaccard
+                counts[label_fn(graph1)][label_fn(graph2)] += 1.
+                counts[label_fn(graph2)][label_fn(graph1)] += 1.
 
-    # save matrix to file
-    with open(mat_path(options), "w") as mat_file:
-        mat_buf = "\t" + "\t".join([os.path.basename(i) for i in options.graphs]) + "\n"
-        for graph1 in options.graphs:
-            mat_buf += os.path.basename(graph1) + "\t"
-            mat_buf += "\t".join([str(mat[graph1][i]) for i in options.graphs]) + "\n"
-        robust_makedirs(os.path.dirname(mat_path(options)))
-        mat_file.write(mat_buf)
+    # divide by counts to get mean
+    for graph1 in map(label_fn, options.graphs):
+        for graph2 in map(label_fn, options.graphs):
+            if graph1 <= graph2:
+                mat[label_fn(graph1)][label_fn(graph2)] /= counts[label_fn(graph1)][label_fn(graph2)]
+                mat[label_fn(graph2)][label_fn(graph1)] /= counts[label_fn(graph2)][label_fn(graph1)]
+                
+    return mat, map(label_fn, options.graphs)
 
+def compute_tree(options, mat, names):
+    """ make upgma hierarchical clustering and write it as png and
+    graphviz dot
+    """
     # oops, convert to biopython matrix
-    names = [os.path.splitext(os.path.basename(i))[0] for i in options.graphs]
     matrix = []
-    for i in xrange(len(options.graphs)):
+    for i in xrange(len(names)):
         row = []
         for j in xrange(i + 1):
             # tree constructor writes 0-distances as 1s for some reason
             # so we hack around here
-            val = float(mat[options.graphs[i]][options.graphs[j]])
+            val = float(mat[names[i]][names[j]])
             if val == 0.:
                 val = 1e-10
             elif val == 1.:
@@ -187,8 +210,34 @@ def cluster_comparisons(options):
         edge["fontsize"] = 14
         edge["len"] = draw_len(weight)
     nx.write_dot(nxgraph, tree_path(options).replace("newick", "dot"))
-    
+        
+def compute_heatmap(options, mat, names):
+    """ make a pdf heatmap out of the matrix
+    """
+    array_mat = []
+    for graph1 in names:
+        array_mat.append([])
+        for graph2 in names:
+            array_mat[-1].append(mat[graph1][graph2])
 
+    plotHeatMap(array_mat, names, names,
+                heatmap_path(options),
+                leftTree=True,
+                topTree=True)
+
+def cluster_comparisons(options):
+    """ write a (tsv) distance matrix
+              a graphviz dot upgma tree (and png)
+              a heatmap (pdf)
+        all based on distance = 1 - jaccard index
+    """
+    mat, names = compute_matrix(options)
+
+    compute_tree(options, mat, names)
+
+    compute_heatmap(options, mat, names)
+
+    
 def compute_kmer_comparison(job, graph1, graph2, options):
     """ run vg compare between two graphs
     """
