@@ -9,11 +9,11 @@ GRAPHS=$1
 VARIANTS=$2
 OUT_DIR=$3
 
-OPTS="--maxCores 20 --kmer 27 --edge_max 7"
+OPTS="--maxCores 20 --kmer 27 --edge_max 7 --avg_samples"
 
 mkdir -f $OUT_DIR
 
-for i in brca1 brca2 sma lrc_kr mhc
+for i in brca1 brca2 sma lrc_kr mhc cenx
 do
-	 rm -rf blon123 ; ./clusterGraphs.py ./blon123 ${GRAPHS}/*${i}*.vg ${VARIANTS}/*${i}*.vg ${OUT_DIR}/${i} ${OPTS}
+	 rm -rf blon123 ; ./clusterGraphs.py ./blon123 ${GRAPHS}/*${i}*.vg ${VARIANTS}/${i}/*/*.vg ${OUT_DIR}/${i} ${OPTS}
 done
