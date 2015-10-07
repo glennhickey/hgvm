@@ -27,7 +27,6 @@ import matplotlib.markers
 from matplotlib.ticker import MultipleLocator, FormatStrFormatter, LogLocator
 from matplotlib.ticker import LogFormatter
 import matplotlib.mlab as mlab
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.mlab import PCA
 import matplotlib.cm as cm
 from matplotlib.colors import LogNorm

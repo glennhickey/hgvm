@@ -111,7 +111,7 @@ def compute_matrix(options):
         if options.avg_samples:
             # ex: NA3453456_agumented.vg -> augmented
             label = "".join(os.path.splitext(os.path.basename(graph))[0].split("_")[1:])
-            assert len(labe) > 0
+            assert len(label) > 0
             return label
         else:
             return os.path.splitext(os.path.basename(graph))[0]
