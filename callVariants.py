@@ -134,15 +134,15 @@ def pileup_path(alignment_path, options, tag=""):
     name += "{}.vgpu".format(tag)
     return os.path.join(out_dir(alignment_path, options), name)
 
-def call_path(alignment_path, options, tag=""):
-    """ get vg call output gam name from input gam
+def sample_vg_path(alignment_path, options, tag=""):
+    """ get vg call output name from input gam
     """
     name = os.path.splitext(os.path.basename(alignment_path))[0]
-    name += "_call{}.gam".format(tag)
+    name += "_sample_{}.vg".format(tag)
     return os.path.join(out_dir(alignment_path, options), name)
 
 def augmented_vg_path(alignment_path, options, tag=""):
-    """ get output augmented variant graph name from input gam
+    """ get output augmented variant graph name from vg call -l
     """
     name = os.path.splitext(os.path.basename(alignment_path))[0]
     name += "{}_augmented.vg".format(tag)
@@ -247,12 +247,12 @@ def compute_vg_variants(job, input_gam, options):
     """
     input_graph_path = graph_path(input_gam, options)
     out_pileup_path = pileup_path(input_gam, options)
-    out_call_path = call_path(input_gam, options)
+    out_sample_vg_path = sample_path(input_gam, options)
     out_augmented_vg_path = augmented_vg_path(input_gam, options)
 
     do_pu = options.overwrite or not os.path.isfile(out_pileup_path)
-    do_call = do_pu or not os.path.isfile(out_call_path)
-    do_aug = do_call or not os.path.isfile(out_augmented_vg_path)
+    do_call = do_pu or not os.path.isfile(out_sample_vg_path)
+    do_aug = do_pu or not os.path.isfile(out_augmented_vg_path)
 
     if do_pu:
         RealTimeLogger.get().info("Computing Variants for {} {}".format(
@@ -265,17 +265,18 @@ def compute_vg_variants(job, input_gam, options):
                                                 out_pileup_path))
 
     if do_call:
-        robust_makedirs(os.path.dirname(out_call_path))
-        run("vg call {} -r 0.001 -d 65 -e 115 -s 30 -t {} > {}".format(out_pileup_path,
-                                                                       options.vg_cores,
-                                                                       out_call_path))
+        robust_makedirs(os.path.dirname(out_sample_vg_path))
+        run("vg call {} {} -r 0.001 -d 65 -e 115 -s 30 -t {} > {}".format(input_graph_path,
+                                                                          out_pileup_path,
+                                                                          options.vg_cores,
+                                                                          out_sample_vg_path))
 
     if do_aug:
         robust_makedirs(os.path.dirname(out_augmented_vg_path))
-        run("vg mod {} -i {} -t {} > {}".format(input_graph_path,
-                                          out_call_path,
-                                          options.vg_cores,
-                                          out_augmented_vg_path))
+        run("vg call {} {} -r 0.001 -d 65 -e 115 -s 30 -t {} -l > {}".format(input_graph_path,
+                                                                          out_pileup_path,
+                                                                          options.vg_cores,
+                                                                          out_augmented_vg_path))
 
 def call_variants(job, options):
     """ run everything (root toil job)
