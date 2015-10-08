@@ -7,6 +7,7 @@ deposit to file/S3/Azure
 The only problem is you can't use it since it won't be installed on your nodes
 """
 
+
 import sys, os, os.path, json, collections, logging, logging.handlers
 import SocketServer, struct, socket, threading, tarfile, shutil
 
@@ -129,7 +130,7 @@ class RealTimeLogger(object):
         
         """
         
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.INFO)
     
         # Start up the logging server
         cls.logging_server = SocketServer.ThreadingUDPServer(("0.0.0.0", 0),
@@ -173,9 +174,14 @@ class RealTimeLogger(object):
             # log
             cls.logger = logging.getLogger('realtime')
             cls.logger.setLevel(logging.DEBUG)
-            cls.logger.addHandler(JSONDatagramHandler(
-                os.environ["RT_LOGGING_HOST"],
-                int(os.environ["RT_LOGGING_PORT"])))
+            
+            if (os.environ.has_key("RT_LOGGING_HOST") and
+                os.environ.has_key("RT_LOGGING_PORT")):
+                # We know where to send messages to, so send them.
+            
+                cls.logger.addHandler(JSONDatagramHandler(
+                    os.environ["RT_LOGGING_HOST"],
+                    int(os.environ["RT_LOGGING_PORT"])))
         
         return cls.logger
 
@@ -263,12 +269,16 @@ class IOStore(object):
         
         raise NotImplementedError()
         
-    def list_input_directory(self, input_path):
+    def list_input_directory(self, input_path, recursive=False):
         """
-        Yields each of the subdirectories and files in the given input path, non-
-        recursively.
+        Yields each of the subdirectories and files in the given input path.
         
-        Gives bare file/directory names with no paths.
+        If recursive is false, yields files and directories in the given
+        directory. If recursive is true, yields all files contained within the
+        current directory, recursively, but does not yield folders.
+        
+        
+        Gives relative file/directory names.
         
         """
         
@@ -278,6 +288,15 @@ class IOStore(object):
         """
         Save the given local file to the given output path. No output directory
         needs to exist already.
+        
+        """
+        
+        raise NotImplementedError()
+        
+    def exists(self, path):
+        """
+        Returns true if the given input or output file exists in the store
+        already.
         
         """
         
@@ -368,14 +387,14 @@ class FileIOStore(IOStore):
         Get input from the filesystem.
         """
         
-        RealTimeLogger.get().info("Loading {} from FileIOStore in {}".format(
+        RealTimeLogger.get().debug("Loading {} from FileIOStore in {}".format(
             input_path, self.path_prefix))
         
         # Make a symlink to grab things
         os.symlink(os.path.abspath(os.path.join(self.path_prefix, input_path)),
             local_path)
         
-    def list_input_directory(self, input_path):
+    def list_input_directory(self, input_path, recursive=False):
         """
         Loop over directories on the filesystem.
         """
@@ -384,14 +403,24 @@ class FileIOStore(IOStore):
             "FileIOStore in {}".format(input_path, self.path_prefix))
         
         for item in os.listdir(os.path.join(self.path_prefix, input_path)):
-            yield item
+            if(recursive and os.isdir(item)):
+                # Recurse on this
+                for subitem in self.list_input_directory(
+                    os.path.join(input_path, item), recursive):
+                    
+                    # Make relative paths include this directory anme and yield
+                    # them
+                    yield os.path.join(item, subitem)
+            else:
+                # This isn't a directory or we aren't being recursive
+                yield item
     
     def write_output_file(self, local_path, output_path):
         """
         Write output to the filesystem
         """
 
-        RealTimeLogger.get().info("Saving {} to FileIOStore in {}".format(
+        RealTimeLogger.get().debug("Saving {} to FileIOStore in {}".format(
             output_path, self.path_prefix))
 
         # What's the real outptu path to write to?
@@ -406,6 +435,15 @@ class FileIOStore(IOStore):
         
         # These are small so we just make copies
         shutil.copy2(local_path, real_output_path)
+        
+    def exists(self, path):
+        """
+        Returns true if the given input or output file exists in the file system
+        already.
+        
+        """
+        
+        return os.path.exists(os.path.join(self.path_prefix, path))
             
 class AzureIOStore(IOStore):
     """
@@ -472,7 +510,7 @@ class AzureIOStore(IOStore):
         """
         
         if self.connection is None:
-            RealTimeLogger.get().info("Connecting to account {}, using "
+            RealTimeLogger.get().debug("Connecting to account {}, using "
                 "container {} and prefix {}".format(self.account_name,
                 self.container_name, self.name_prefix))
         
@@ -489,7 +527,7 @@ class AzureIOStore(IOStore):
         self.__connect()
         
         
-        RealTimeLogger.get().info("Loading {} from AzureIOStore".format(
+        RealTimeLogger.get().debug("Loading {} from AzureIOStore".format(
             input_path))
         
         # Download the blob. This is known to be synchronous, although it can
@@ -497,7 +535,7 @@ class AzureIOStore(IOStore):
         self.connection.get_blob_to_path(self.container_name,
             self.name_prefix + input_path, local_path)
             
-    def list_input_directory(self, input_path):
+    def list_input_directory(self, input_path, recursive=False):
         """
         Loop over fake /-delimited directories on Azure. The prefix may or may
         not not have a trailing slash; if not, one will be added automatically.
@@ -523,7 +561,8 @@ class AzureIOStore(IOStore):
         # page, if there is one. See <http://stackoverflow.com/a/24303682>
         marker = None
         
-        # This holds the subdirectories we found; we yield each exactly once.
+        # This holds the subdirectories we found; we yield each exactly once if
+        # we aren't recursing.
         subdirectories = set()
         
         while True:
@@ -539,8 +578,9 @@ class AzureIOStore(IOStore):
                 # Drop the common prefix
                 relative_path = blob.name[len(fake_directory):]
                 
-                if "/" in relative_path:
-                    # We found a file in a subdirectory
+                if (not recursive) and "/" in relative_path:
+                    # We found a file in a subdirectory, and we aren't supposed
+                    # to be recursing.
                     subdirectory, _ = relative_path.split("/", 1)
                     
                     if subdirectory not in subdirectories:
@@ -565,7 +605,7 @@ class AzureIOStore(IOStore):
         
         self.__connect()
         
-        RealTimeLogger.get().info("Saving {} to AzureIOStore".format(
+        RealTimeLogger.get().debug("Saving {} to AzureIOStore".format(
             output_path))
         
         try:
@@ -579,8 +619,38 @@ class AzureIOStore(IOStore):
         # TODO: catch no container error here, make the container, and retry
         self.connection.put_block_blob_from_path(self.container_name,
             self.name_prefix + output_path, local_path)
-
+            
+    def exists(self, path):
+        """
+        Returns true if the given input or output file exists in Azure already.
         
+        """
+        
+        self.__connect()
+        
+        marker = None
+        
+        while True:
+        
+            # Get the results from Azure.
+            result = self.connection.list_blobs(self.container_name, 
+                prefix=self.name_prefix + path, marker=marker)
+                
+            for blob in result:
+                # Look at each blob
+                
+                if blob.name == self.name_prefix + path:
+                    # Found it
+                    return True
+                
+            # Save the marker
+            marker = result.next_marker
+                
+            if not marker:
+                break 
+        
+        return False
+
     
 
 
