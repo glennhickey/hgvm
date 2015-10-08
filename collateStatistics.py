@@ -114,6 +114,8 @@ def collate_region(job, options, region):
     
     # Where will we put our final collated files?
     mapping_key="plots/mapping.{}.tsv".format(region)
+    perfect_key="plots/perfect.{}.tsv".format(region)
+    one_error_key="plots/oneerror.{}.tsv".format(region)
     single_mapping_key="plots/singlemapping.{}.tsv".format(region)
     runtime_key="plots/runtime.{}.tsv".format(region)
     
@@ -121,6 +123,12 @@ def collate_region(job, options, region):
     mapping_temp_name = os.path.join(job.fileStore.getLocalTempDir(),
         "mapping.tsv")
     mapping_temp = open(mapping_temp_name, "w")
+    perfect_temp_name = os.path.join(job.fileStore.getLocalTempDir(),
+        "perfect.tsv")
+    perfect_temp = open(perfect_temp_name, "w")
+    one_error_temp_name = os.path.join(job.fileStore.getLocalTempDir(),
+        "oneerror.tsv")
+    one_error_temp = open(one_error_temp_name, "w")
     single_mapping_temp_name = os.path.join(job.fileStore.getLocalTempDir(),
         "singlemapping.tsv")
     single_mapping_temp = open(single_mapping_temp_name, "w")
@@ -147,11 +155,19 @@ def collate_region(job, options, region):
             
             # How many reads are mapped well enough?
             total_mapped = sum((stats["primary_mismatches"].get(str(x), 0)
-                for x in xrange(2)))
+                for x in xrange(3)))
                 
             # How many reads are multimapped well enough?
             total_multimapped = sum((stats["secondary_mismatches"].get(str(x),
-                0) for x in xrange(2)))
+                0) for x in xrange(3)))
+                
+            # How many reads are perfect?
+            total_perfect = sum((stats["primary_mismatches"].get(str(x), 0)
+                for x in xrange(1)))
+                
+            # How many reads are mapped with <=1 error?
+            total_one_error = sum((stats["primary_mismatches"].get(str(x), 0)
+                for x in xrange(2)))
                 
             # How many reads are there overall for this sample?
             total_reads = stats["total_reads"]
@@ -167,20 +183,30 @@ def collate_region(job, options, region):
                 total_reads)
             # What portion are mapped?
             portion_mapped = total_mapped / float(total_reads)
+            # What portion are perfect?
+            portion_perfect = total_perfect / float(total_reads)
+            # What portion are <=1 error?
+            portion_one_error = total_one_error / float(total_reads)
 
             # Append lines to the files            
             mapping_temp.write("{}\t{}\n".format(graph, portion_mapped))
+            perfect_temp.write("{}\t{}\n".format(graph, portion_perfect))
+            one_error_temp.write("{}\t{}\n".format(graph, portion_one_error))
             single_mapping_temp.write("{}\t{}\n".format(graph,
                 portion_single_mapped))
             runtime_temp.write("{}\t{}\n".format(graph, runtime))
             
     # Flush and close the files
     mapping_temp.close()
+    perfect_temp.close()
+    one_error_temp.close()
     single_mapping_temp.close()
     runtime_temp.close()
     
     # Save them to the final places
     out_store.write_output_file(mapping_temp_name, mapping_key)
+    out_store.write_output_file(perfect_temp_name, perfect_key)
+    out_store.write_output_file(one_error_temp_name, one_error_key)
     out_store.write_output_file(single_mapping_temp_name, single_mapping_key)
     out_store.write_output_file(runtime_temp_name, runtime_key)
     

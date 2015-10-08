@@ -21,6 +21,7 @@ PLOT_PARAMS=(
     "7 Bridges" "RefOnly" "Trivial" "Level1" "Level2" "Level3"
     --colors "#5C755E" "#C19A6B" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m"
     "#93AC2B" "c" "b" "c" "m" "y"
+    --font_size 20 --dpi 90 --no_n
 )
 
 # Where are the stats files
@@ -32,9 +33,13 @@ mkdir -p "${PLOTS_DIR}"
 
 # We need overall files for mapped and multimapped
 OVERALL_MAPPING_FILE="${PLOTS_DIR}/mapping.tsv"
-OVERALL_MAPPING_PLOT="${PLOTS_DIR}/mapping.png"
+OVERALL_MAPPING_PLOT="${PLOTS_DIR}/mapping.ALL.png"
+OVERALL_PERFECT_FILE="${PLOTS_DIR}/perfect.tsv"
+OVERALL_PERFECT_PLOT="${PLOTS_DIR}/perfect.ALL.png"
+OVERALL_ONE_ERROR_FILE="${PLOTS_DIR}/oneerror.tsv"
+OVERALL_ONE_ERROR_PLOT="${PLOTS_DIR}/oneerror.ALL.png"
 OVERALL_SINGLE_MAPPING_FILE="${PLOTS_DIR}/singlemapping.tsv"
-OVERALL_SINGLE_MAPPING_PLOT="${PLOTS_DIR}/singlemapping.png"
+OVERALL_SINGLE_MAPPING_PLOT="${PLOTS_DIR}/singlemapping.ALL.png"
 
 for REGION in `ls ${PLOTS_DIR}/mapping.*.tsv | xargs -n 1 basename | sed 's/mapping.\(.*\).tsv/\1/'`
 do
@@ -43,6 +48,10 @@ do
     # We have intermediate data files for plotting from
     MAPPING_FILE="${PLOTS_DIR}/mapping.${REGION}.tsv"
     MAPPING_PLOT="${PLOTS_DIR}/mapping.${REGION}.png"
+    PERFECT_FILE="${PLOTS_DIR}/perfect.${REGION}.tsv"
+    PERFECT_PLOT="${PLOTS_DIR}/perfect.${REGION}.png"
+    ONE_ERROR_FILE="${PLOTS_DIR}/oneerror.${REGION}.tsv"
+    ONE_ERROR_PLOT="${PLOTS_DIR}/oneerror.${REGION}.png"
     SINGLE_MAPPING_FILE="${PLOTS_DIR}/singlemapping.${REGION}.tsv"
     SINGLE_MAPPING_PLOT="${PLOTS_DIR}/singlemapping.${REGION}.png"
     RUNTIME_FILE="${PLOTS_DIR}/runtime.${REGION}.tsv"
@@ -58,27 +67,38 @@ do
         --title "$(printf "Mapped (<=2 mismatches)\nreads in ${REGION^^}")" \
         --x_label "Graph" --y_label "Portion mapped" --save "${MAPPING_PLOT}" \
         --x_sideways \
-        "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90 --no_n
+        "${PLOT_PARAMS[@]}"
+        
+    ./boxplot.py "${PERFECT_FILE}" \
+        --title "$(printf "Perfectly mapped\nreads in ${REGION^^}")" \
+        --x_label "Graph" --y_label "Portion perfectly mapped" --save "${PERFECT_PLOT}" \
+        --x_sideways \
+        "${PLOT_PARAMS[@]}"
+        
+    ./boxplot.py "${ONE_ERROR_FILE}" \
+        --title "$(printf "One-error (<=1 mismatch)\nreads in ${REGION^^}")" \
+        --x_label "Graph" --y_label "Portion" --save "${ONE_ERROR_PLOT}" \
+        --x_sideways \
+        "${PLOT_PARAMS[@]}"
         
     ./boxplot.py "${SINGLE_MAPPING_FILE}" \
-        --title "$(printf "Single-mapped (<=2 mismatches)\nreads in ${REGION^^}")" \
-        --x_label "Graph" --y_label "Portion single-mapped" --save "${SINGLE_MAPPING_PLOT}" \
+        --title "$(printf "Uniquely mapped (<=2 mismatches)\nreads in ${REGION^^}")" \
+        --x_label "Graph" --y_label "Portion uniquely mapped" --save "${SINGLE_MAPPING_PLOT}" \
         --x_sideways \
-        "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90 --no_n
+        "${PLOT_PARAMS[@]}"
         
     ./boxplot.py "${RUNTIME_FILE}" \
         --title "$(printf "Aligner runtime\n in ${REGION^^}")" \
         --x_label "Graph" --y_label "Runtime per sample (seconds)" --save "${RUNTIME_PLOT}" \
         --x_sideways \
-        "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90 --no_n
+        "${PLOT_PARAMS[@]}"
     
 done
 
 # Aggregate the overall files
 cat "${PLOTS_DIR}"/mapping.*.tsv > "${OVERALL_MAPPING_FILE}"
+cat "${PLOTS_DIR}"/perfect.*.tsv > "${OVERALL_PERFECT_FILE}"
+cat "${PLOTS_DIR}"/oneerror.*.tsv > "${OVERALL_ONE_ERROR_FILE}"
 cat "${PLOTS_DIR}"/singlemapping.*.tsv > "${OVERALL_SINGLE_MAPPING_FILE}"
 
 # Make the overall plots
@@ -86,13 +106,23 @@ cat "${PLOTS_DIR}"/singlemapping.*.tsv > "${OVERALL_SINGLE_MAPPING_FILE}"
     --title "$(printf "Mapped (<=2 mismatches)\nreads")" \
     --x_label "Graph" --y_label "Portion mapped" --save "${OVERALL_MAPPING_PLOT}" \
     --x_sideways \
-    "${PLOT_PARAMS[@]}" \
-    --font_size 20 --dpi 90 --no_n
+    "${PLOT_PARAMS[@]}"
+    
+./boxplot.py "${OVERALL_PERFECT_FILE}" \
+    --title "$(printf "Perfectly mapped\nreads")" \
+    --x_label "Graph" --y_label "Portion perfectly mapped" --save "${OVERALL_PERFECT_PLOT}" \
+    --x_sideways \
+    "${PLOT_PARAMS[@]}"
+    
+./boxplot.py "${OVERALL_ONE_ERROR_FILE}" \
+    --title "$(printf "One-error (<=1 mismatch)\nreads")" \
+    --x_label "Graph" --y_label "Portion" --save "${OVERALL_ONE_ERROR_PLOT}" \
+    --x_sideways \
+    "${PLOT_PARAMS[@]}"
 
 ./boxplot.py "${OVERALL_SINGLE_MAPPING_FILE}" \
-    --title "$(printf "Single-mapped (<=2 mismatches)\nreads")" \
-    --x_label "Graph" --y_label "Portion single-mapped" --save "${OVERALL_SINGLE_MAPPING_PLOT}" \
+    --title "$(printf "Uniquely mapped (<=2 mismatches)\nreads")" \
+    --x_label "Graph" --y_label "Portion uniquely mapped" --save "${OVERALL_SINGLE_MAPPING_PLOT}" \
     --x_sideways \
-    "${PLOT_PARAMS[@]}" \
-    --font_size 20 --dpi 90 --no_n
+    "${PLOT_PARAMS[@]}"
 

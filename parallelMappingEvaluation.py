@@ -797,7 +797,7 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
         # What's the file that has to exist for us to not re-run it?
         stats_file_key = "{}/{}.json".format(stats_dir, sample)
         
-        if options.overwrite or out_store.exists(stats_file_key):
+        if (not options.overwrite) and out_store.exists(stats_file_key):
             # This is already done.
             RealTimeLogger.get().info("Skipping completed alignment of "
                 "{} to {} {}".format(sample, graph_name, region))
