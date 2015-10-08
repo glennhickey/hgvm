@@ -8,7 +8,7 @@ import doctest, re, json, collections, time, timeit, string
 from operator import sub
 from toil.job import Job
 from toillib import RealTimeLogger, robust_makedirs
-from callVariants import call_path, augmented_vg_path, alignment_region_tag, alignment_graph_tag
+from callVariants import sample_vg_path, augmented_vg_path, alignment_region_tag, alignment_graph_tag
 from callVariants import graph_path, index_path, augmented_vg_path, linear_vg_path, linear_vcf_path
 from callVariants import alignment_region_tag
 
@@ -137,19 +137,31 @@ def compute_comparison(job, baseline, graph, options):
                                                        min(2, options.vg_cores),
                                                        out_path))
            
-def count_gam_paths(gam, options):
-    """ get number of snps by counting the paths in an alignment. only
-    workds for agumented vg graphs made by the callVariants script
+def count_vg_paths(vg, options):
+    """ assuming output of vg call here, where one path written per snp 
     """
-    if not os.path.exists(gam):
+    if not os.path.exists(vg):
         return -1
-    cmd = "vg view -a -j {} | jq .path | jq length | wc -l".format(gam)
+    cmd = "vg view -j {} | jq .path | jq length".format(vg)
     p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                          stderr=sys.stderr, bufsize=-1)
     output, _ = p.communicate()
     assert p.wait() == 0
     num_paths = int(output.strip())
     return num_paths
+
+def vg_length(vg, options):
+    """ get sequence length out of vg stats
+    """
+    if not os.path.exists(vg):
+        return -1
+    cmd = "vg stats -l {}".format(vg)
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                         stderr=sys.stderr, bufsize=-1)
+    output, _ = p.communicate()
+    assert p.wait() == 0
+    length = int(output.split()[1])
+    return length    
 
 def count_vcf_snps(vcf, options):
     """ get number of snps from bcftools
@@ -282,21 +294,51 @@ def snp_count_table(options):
     """
     # tsv header
     count_table =  "#\t{}\t\n".format(options.baseline)
-    count_table += "#graph\tlinear_snp_count\taugmented_snp_count\n"
+    count_table += "#graph\tlinear_snp_count\tsample_snp_count\taugmented_snp_count\n"
 
     for gam in options.in_gams:
         linear_vcf = linear_vcf_path(gam, options) + ".gz"
-        vg_gam = call_path(gam, options)
+        vg_sample = sample_vg_path(gam, options)
+        vg_augmented = augmented_vg_path(gam, options)
         vcf_snps = count_vcf_snps(linear_vcf, options)
-        gam_snps = count_gam_paths(vg_gam, options)
+        sample_snps = count_vg_paths(vg_sample, options)
+        augmented_snps = count_vg_paths(vg_augmented, options)
 
-        count_table +="{}\t{}\t{}\n".format(
+        count_table +="{}\t{}\t{}\t{}\n".format(
             graph_path(gam, options),
             vcf_snps,
-            gam_snps)
+            sample_snps,
+            augmented_snps)
 
     with open(count_tsv_path(options), "w") as ofile:
         ofile.write(count_table)
+
+def graph_size_table(options):
+    """ make a table of sequence lengths for the vg call outputs
+    """
+    # tsv header
+    count_table =  "#\t{}\t\n".format(options.baseline)
+    count_table += "#graph\tgraph_length\tsample_seq_length\taugmented_length\n"
+
+    for gam in options.in_gams:
+        linear_vcf = linear_vcf_path(gam, options) + ".gz"
+        vg_sample = sample_vg_path(gam, options)
+        vg_augmented = augmented_vg_path(gam, options)
+        original = graph_path(gam, options)
+
+        original_length = vg_length(original, options)
+        sample_length = vg_length(vg_sample, options)
+        augmented_length = vg_length(vg_augmented, options)
+
+        count_table +="{}\t{}\t{}\t{}\n".format(
+            graph_path(gam, options),
+            original_length,
+            sample_length,
+            augmented_length)
+
+    with open(count_tsv_path(options), "w") as ofile:
+        ofile.write(count_table)
+    
     
 def compute_all_comparisons(job, options):
     """ run vg compare in parallel on all the graphs,
@@ -369,6 +411,7 @@ def main(args):
     dist_table(options)
     acc_table(options)
     snp_count_table(options)
+    graph_size_table(options)
     
 if __name__ == "__main__" :
     sys.exit(main(sys.argv))
