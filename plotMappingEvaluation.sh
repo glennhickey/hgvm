@@ -16,10 +16,11 @@ fi
 # Set up the plot parameters
 PLOT_PARAMS=(
     --categories "cactus" "camel" "vg" "curoverse" "simons" "snp1000g" "prg" "debruijn-k31" "debruijn-k63"
-    "refonly" "trivial" "level1" "level2" "level3"
+    "sbg" "refonly" "trivial" "level1" "level2" "level3"
     --category_labels "Cactus" "Camel" "VG"  "Curoverse" "Simons SNPs" "1000 GSNPs" "PRG" "k=31" "k=63"
-    "RefOnly" "Trivial" "Level1" "Level2" "Level3"
-    --colors "#5C755E" "#C19A6B" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m" "c" "b" "c" "m" "y"
+    "7 Bridges" "RefOnly" "Trivial" "Level1" "Level2" "Level3"
+    --colors "#5C755E" "#C19A6B" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m"
+    "#93AC2B" "c" "b" "c" "m" "y"
 )
 
 # Where are the stats files
@@ -35,7 +36,7 @@ OVERALL_MAPPING_PLOT="${PLOTS_DIR}/mapping.png"
 OVERALL_SINGLE_MAPPING_FILE="${PLOTS_DIR}/singlemapping.tsv"
 OVERALL_SINGLE_MAPPING_PLOT="${PLOTS_DIR}/singlemapping.png"
 
-for REGION in `ls ${STATS_DIR}`
+for REGION in `ls ${PLOTS_DIR}/mapping.*.tsv | xargs -n 1 basename | sed 's/mapping.\(.*\).tsv/\1/'`
 do
     # For every region we ran
     
@@ -47,58 +48,11 @@ do
     RUNTIME_FILE="${PLOTS_DIR}/runtime.${REGION}.tsv"
     RUNTIME_PLOT="${PLOTS_DIR}/runtime.${REGION}.png"
     
-    # Make them empty
-    :>"${MAPPING_FILE}"
-    :>"${SINGLE_MAPPING_FILE}"
-    :>"${RUNTIME_FILE}"
-    
-    
     echo "Plotting ${REGION^^}..."
     
-    for GRAPH_NAME in `ls ${STATS_DIR}/${REGION}`
-    do
-        # For every graph we ran for it
-        
-        for STATS_FILE in `ls ${STATS_DIR}/${REGION}/${GRAPH_NAME}`
-        do
-            # For each sample run, parse its JSON and add a point to the region
-            # TSV for the appropriate graph.
-            
-            # We care about single-mapped reads, multi- mapped reads, unmapped
-            # reads
-            
-            # First build the path to the JSON file to look at
-            JSON_FILE="${STATS_DIR}/${REGION}/${GRAPH_NAME}/${STATS_FILE}"
-            
-            # How many reads have any good mapping?
-            # We need the 0 + in case there are no sufficiently good mappings
-            TOTAL_MAPPED=`cat "${JSON_FILE}" | jq -r '(0 + .primary_mismatches."0" + .primary_mismatches."1" + .primary_mismatches."2")'`
-            
-            # How many have good secondary mappings? This is a subset of the
-            # above.
-            TOTAL_MULTIMAPPED=`cat "${JSON_FILE}" | jq -r '(0 + .secondary_mismatches."0" + .secondary_mismatches."1" + .secondary_mismatches."2")'`
-            
-            # How many reads are there?
-            TOTAL_READS=`cat "${JSON_FILE}" | jq -r '.total_reads'`
-            
-            # Do some math
-            PORTION_SINGLE_MAPPED=`echo "(${TOTAL_MAPPED} - ${TOTAL_MULTIMAPPED})/${TOTAL_READS}" | bc -l`
-            PORTION_MAPPED=`echo "${TOTAL_MAPPED}/${TOTAL_READS}" | bc -l`
-            PORTION_UNMAPPED=`echo "1 - ${TOTAL_MAPPED}/${TOTAL_READS}" | bc -l`
-            
-            # We need to account for the well-mapped/well-multimapped identity thresholds
-            
-            # First: portion mapped with <=2 mismatches out of 100 expected length
-            printf "${GRAPH_NAME}\t${PORTION_MAPPED}\n" >> "${MAPPING_FILE}"
-
-            # Next: portion single mapped
-            printf "${GRAPH_NAME}\t${PORTION_SINGLE_MAPPED}\n" >> "${SINGLE_MAPPING_FILE}"
-            
-            # Next: runtime in seconds
-            printf "${GRAPH_NAME}\t" >> "${RUNTIME_FILE}"
-            cat "${JSON_FILE}" | jq -r '.run_time' | sed 's/null/nan/g' >> "${RUNTIME_FILE}"
-        done
-    done
+    # TODO: you need to run collateStatistics.py to build the per-region-and-
+    # graph stats files. We expect them to exist and only concatenate the final
+    # overall files and make the plots.
     
     ./boxplot.py "${MAPPING_FILE}" \
         --title "$(printf "Mapped (<=2 mismatches)\nreads in ${REGION^^}")" \

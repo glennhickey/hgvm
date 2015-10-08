@@ -173,7 +173,7 @@ class RealTimeLogger(object):
             # Only do the setup once, so we don't add a handler every time we
             # log
             cls.logger = logging.getLogger('realtime')
-            cls.logger.setLevel(logging.DEBUG)
+            cls.logger.setLevel(logging.INFO)
             
             if (os.environ.has_key("RT_LOGGING_HOST") and
                 os.environ.has_key("RT_LOGGING_PORT")):
