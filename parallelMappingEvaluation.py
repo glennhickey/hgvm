@@ -680,6 +680,8 @@ def parse_args(args):
         help="URL to download sg2vg and vg binaries from, without Docker")
     parser.add_argument("--overwrite", default=False, action="store_true",
         help="overwrite existing result files")
+    parser.add_argument("--reindex", default=False, action="store_true",
+        help="don't re-use existing indexed graphs")
     
     # The command line arguments start with the program name, which we don't
     # want to treat as an argument for argparse. So we remove it.
@@ -814,57 +816,85 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
     # Make the real URL with the version
     versioned_url = url + options.server_version
     
-    # Work out where the graph goes
-    # it will be graph.vg in here
-    graph_dir = "{}/graph".format(job.fileStore.getLocalTempDir())
-    robust_makedirs(graph_dir)
+    # Where will the indexed graph go in the output
+    index_key = "indexes/{}/{}.tar.gz".format(region, graph_name)
     
-    graph_filename = "{}/graph.vg".format(graph_dir)
-    
-    # Download and fix up the graph with this ugly subprocess pipeline
-    # sg2vg "${URL}" -u | vg view -Jv - | vg mod -X 100 - | vg ids -s - > "graphs/${BASENAME}.vg"
-    
-    with open(graph_filename, "w") as output_file:
-    
-        RealTimeLogger.get().info("Downloading {} to {}".format(versioned_url,
-            graph_filename))
-    
-        # Hold all the popen objects we need for this
-        tasks = []
+    if (not options.reindex) and out_store.exists(index_key):
+        # See if we have an index already available in the output store from a
+        # previous run
         
-        # Do the download
-        tasks.append(subprocess.Popen(["{}/sg2vg".format(bin_dir),
-            versioned_url, "-u"], stdout=subprocess.PIPE))
-        
-        # Pipe through zcat
-        tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "view", "-Jv",
-            "-"], stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
-        
-        # And cut
-        tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "mod", "-X100",
-            "-"], stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
+        RealTimeLogger.get().info("Retrieving indexed {} graph from output "
+            "store".format(basename))
             
-        # And uniq
-        tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "ids", "-s",
-            "-"], stdin=tasks[-1].stdout, stdout=output_file))
-            
-        # Did we make it through all the tasks OK?
-        for task in tasks:
-            if task.wait() != 0:
-                raise RuntimeError("Pipeline step returned {}".format(
-                    task.returncode))
-                    
-    # Now run the indexer.
-    # TODO: support both indexing modes
-    RealTimeLogger.get().info("Indexing {}".format(graph_filename))
-    subprocess.check_call(["{}/vg".format(bin_dir), "index", "-s", "-k",
-        str(options.kmer_size), "-e", str(options.edge_max),
-        "-t", str(job.cores), graph_filename])
+        # Download the pre-made index directory
+        tgz_file = "{}/index.tar.gz".format(job.fileStore.getLocalTempDir())
+        out_store.read_input_file(index_key, tgz_file)
         
-    # Now save the indexed graph directory to the file store. It can be cleaned
-    # up since only our children use it.
-    index_dir_id = write_global_directory(job.fileStore, graph_dir,
-        cleanup=True)
+        # Save it to the global file store and keep around the ID.
+        # Will be compatible with read_global_directory
+        index_dir_id = job.fileStore.writeGlobalFile(tgz_file, cleanup=True)
+        
+    else:
+        # Download the graph, build the index, and store it in the output store
+    
+        # Work out where the graph goes
+        # it will be graph.vg in here
+        graph_dir = "{}/graph".format(job.fileStore.getLocalTempDir())
+        robust_makedirs(graph_dir)
+        
+        graph_filename = "{}/graph.vg".format(graph_dir)
+        
+        # Download and fix up the graph with this ugly subprocess pipeline
+        # sg2vg "${URL}" -u | vg view -Jv - | vg mod -X 100 - | 
+        # vg ids -s - > "graphs/${BASENAME}.vg"
+        
+        with open(graph_filename, "w") as output_file:
+        
+            RealTimeLogger.get().info("Downloading {} to {}".format(
+                versioned_url, graph_filename))
+        
+            # Hold all the popen objects we need for this
+            tasks = []
+            
+            # Do the download
+            tasks.append(subprocess.Popen(["{}/sg2vg".format(bin_dir),
+                versioned_url, "-u"], stdout=subprocess.PIPE))
+            
+            # Pipe through zcat
+            tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "view",
+                "-Jv", "-"], stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
+            
+            # And cut
+            tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "mod",
+                "-X100", "-"], stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
+                
+            # And uniq
+            tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "ids", "-s",
+                "-"], stdin=tasks[-1].stdout, stdout=output_file))
+                
+            # Did we make it through all the tasks OK?
+            for task in tasks:
+                if task.wait() != 0:
+                    raise RuntimeError("Pipeline step returned {}".format(
+                        task.returncode))
+        
+        # Now run the indexer.
+        # TODO: support both indexing modes
+        RealTimeLogger.get().info("Indexing {}".format(graph_filename))
+        subprocess.check_call(["{}/vg".format(bin_dir), "index", "-s", "-k",
+            str(options.kmer_size), "-e", str(options.edge_max),
+            "-t", str(job.cores), graph_filename])
+            
+        # Now save the indexed graph directory to the file store. It can be
+        # cleaned up since only our children use it.
+        index_dir_id = write_global_directory(job.fileStore, graph_dir,
+            cleanup=True)
+            
+        # Add a child to actually save the graph to the output. Hack our own job
+        # so that the actual alignment targets get added as a child of this, so
+        # they happen after. TODO: massive hack!
+        job = job.addChildJobFn(save_indexed_graph, options, index_dir_id,
+            index_key, cores=1, memory="10G", disk="50G")
                     
     for sample in samples_to_run:
         # Split out over each sample that needs to be run
@@ -884,6 +914,28 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
         job.addChildJobFn(run_alignment, options, bin_dir_id, region,
             index_dir_id, sample_fastq, alignment_file_key, stats_file_key,
             cores=16, memory="100G", disk="50G")
+            
+def save_indexed_graph(job, options, index_dir_id, output_key):
+    """
+    Save the index dir tar file in the given output key.
+    
+    Runs as a child to ensure that the global file store can actually
+    produce the file when asked (because within the same job, depending on Toil
+    guarantees, it might still be uploading).
+    
+    """
+    
+    # Set up the IO stores each time, since we can't unpickle them on Azure for
+    # some reason.
+    sample_store = IOStore.get(options.sample_store)
+    out_store = IOStore.get(options.out_store)
+    
+    # Get the tar.gz file
+    local_path = job.fileStore.readGlobalFile(index_dir_id)
+    
+    # Save it as output
+    out_store.write_output_file(local_path, output_key)
+    
    
 def run_alignment(job, options, bin_dir_id, region, index_dir_id,
     sample_fastq_key, alignment_file_key, stats_file_key):
@@ -1067,7 +1119,7 @@ def main(args):
     
     # Make a root job
     root_job = Job.wrapJobFn(run_all_alignments, options,
-        cores=16, memory="100G", disk="50G")
+        cores=1, memory="4G", disk="50G")
     
     # Run it and see how many jobs fail
     failed_jobs = Job.Runner.startToil(root_job,  options)
