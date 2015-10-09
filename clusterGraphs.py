@@ -40,6 +40,10 @@ def parse_args(args):
                         help="number of cores to give to vg commands")
     parser.add_argument("--avg_samples", action="store_true", default=False,
                         help="Average samples into mean value")
+    parser.add_argument("--dir_tag", action="store_true", default=False,
+                         help="Use directory of graph as name tag")
+    parser.add_argument("--orig_tag", type=str, default="graphs",
+                        help="When dir_tag used, change this tag to original")
                             
     args = args[1:]
 
@@ -65,12 +69,23 @@ def compute_kmer_index(job, graph, options):
     if do_index:
         os.system("vg index {} {}".format(index_opts, graph))
 
+def dir_tag(graph, options):
+    """ optionally use directory for unique prefix
+    """
+    if not options.dir_tag:
+        return ""
+    tag = graph.split("/")[-2] + "_"
+    if tag == options.orig_tag + "_":
+        tag = "original_"
+    return tag
+
 def comp_path(graph1, graph2, options):
     """ get the path for json output of vg compare
     """
-    return os.path.join(options.out_dir, "compare",
-                        os.path.splitext(os.path.basename(graph1))[0] + "_vs_" +
-                        os.path.splitext(os.path.basename(graph2))[0] + ".json")
+    name1 = dir_tag(graph1, options) + os.path.splitext(os.path.basename(graph1))[0]
+    name2 = dir_tag(graph2, options) + os.path.splitext(os.path.basename(graph2))[0]
+    
+    return os.path.join(options.out_dir, "compare", name1 + "_vs_" + name2 + ".json")
 
 def mat_path(options):
     """ get the path of the distance matrix
@@ -111,10 +126,19 @@ def compute_matrix(options):
         if options.avg_samples:
             # ex: NA3453456_agumented.vg -> augmented
             label = "".join(os.path.splitext(os.path.basename(graph))[0].split("_")[1:])
+            if label == "":
+                label = "".join(os.path.splitext(os.path.basename(graph))[0].split("_")[0])
+                label = label.split("-")[0]
+            label = dir_tag(graph, options) + label
+
+            # hack (original_cactus -> cactus_original)
+            if label.split("_")[0] == "original" and len(label.split("_")) > 1:
+                label = "_".join(label.split("_")[1:]) + "_" + label.split("_")[0]
+
             assert len(label) > 0
             return label
         else:
-            return os.path.splitext(os.path.basename(graph))[0]
+            return dir_tag(graph, options) + os.path.splitext(os.path.basename(graph))[0]
 
     # make empty distance matrix and counts table (for mean)
     mat = dict()
@@ -143,11 +167,9 @@ def compute_matrix(options):
     # divide by counts to get mean
     for graph1 in map(label_fn, options.graphs):
         for graph2 in map(label_fn, options.graphs):
-            if graph1 <= graph2:
-                mat[label_fn(graph1)][label_fn(graph2)] /= counts[label_fn(graph1)][label_fn(graph2)]
-                mat[label_fn(graph2)][label_fn(graph1)] /= counts[label_fn(graph2)][label_fn(graph1)]
-                
-    return mat, map(label_fn, options.graphs)
+            mat[graph1][graph2] /= counts[graph1][graph2]
+
+    return mat, list(set(map(label_fn, options.graphs)))
 
 def compute_tree(options, mat, names):
     """ make upgma hierarchical clustering and write it as png and
