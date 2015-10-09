@@ -431,7 +431,7 @@ class FileIOStore(IOStore):
         
         """
         
-        return os.path.exists(path)
+        return os.path.exists(os.path.join(self.path_prefix, path))
             
 class AzureIOStore(IOStore):
     """
