@@ -808,8 +808,9 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
             # We need to run this sample
             samples_to_run.append(sample)
             
-    if len(samples_to_run) == 0:
-        # Don't bother indexing the graph if all the samples are done.
+    if len(samples_to_run) == 0 and not options.reindex:
+        # Don't bother indexing the graph if all the samples are done, and we
+        # didn't explicitly ask to do it.
         RealTimeLogger.get().info("Nothing to align to {}".format(basename))
         return
     
