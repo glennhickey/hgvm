@@ -48,7 +48,6 @@ def parse_args(args):
                          help="Use directory of graph as name tag")
     parser.add_argument("--orig_tag", type=str, default="graphs",
                         help="When dir_tag used, change this tag to original")
-
     parser.add_argument("--out_sub", type=str, default="",
                         help="make a subfolder with this name for output")
                             
@@ -78,22 +77,34 @@ def json_out_path(options):
 def dist_tsv_path(options):
     """ path where the tsv for tdistance goes
     """
+    tag = ""
+    if len(options.out_sub) > 0:
+        tag = options.out_sub + "_"
     return os.path.join(compare_out_path(options),
-                        "call_dist_{}.tsv".format(options.baseline))
+                        "{}call_dist_{}.tsv".format(tag, options.baseline))
 
 def acc_tsv_path(options):
     """ path where the tsv for prec/rec/f1 goes
     """
+    tag = ""
+    if len(options.out_sub) > 0:
+        tag = options.out_sub + "_"    
     return os.path.join(compare_out_path(options),
-                        "call_acc_{}.tsv".format(options.baseline))
+                        "{}call_acc_{}.tsv".format(tag, options.baseline))
 
 def count_tsv_path(options):
+    tag = ""
+    if len(options.out_sub) > 0:
+        tag = options.out_sub + "_"    
     return os.path.join(compare_out_path(options),
-                        "call_count_{}.tsv".format(options.baseline))
+                        "{}call_count_{}.tsv".format(tag, options.baseline))
 
 def size_tsv_path(options):
+    tag = ""
+    if len(options.out_sub) > 0:
+        tag = options.out_sub + "_"    
     return os.path.join(compare_out_path(options),
-                        "call_size_{}.tsv".format(options.baseline))
+                        "{}call_size_{}.tsv".format(tag, options.baseline))
 
 def baseline_path(gam, options):
     """ put together path for baseline graph 
