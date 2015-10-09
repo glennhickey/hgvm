@@ -82,10 +82,10 @@ def tree_path(options):
     """
     return os.path.join(options.out_dir, "tree.newick")
 
-def heatmap_path(options):
+def heatmap_path(options, tag=""):
     """ path for heatmap
     """
-    return os.path.join(options.out_dir, "heatmap.pdf")
+    return os.path.join(options.out_dir, "heatmap{}.pdf".format(tag))
 
 def draw_len(weight):
     """ actual weights are between 0 and 1 but vary by many orders of
@@ -226,7 +226,15 @@ def compute_heatmap(options, mat, names):
     plotHeatMap(array_mat, names, names,
                 heatmap_path(options),
                 leftTree=True,
-                topTree=True)
+                topTree=True,
+                logNorm=False)
+
+    plotHeatMap(array_mat, names, names,
+                heatmap_path(options, "_log"),
+                leftTree=True,
+                topTree=True,
+                logNorm=True)
+
 
 def cluster_comparisons(options):
     """ write a (tsv) distance matrix

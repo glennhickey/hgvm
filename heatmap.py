@@ -29,7 +29,7 @@ from matplotlib.ticker import LogFormatter
 import matplotlib.mlab as mlab
 from matplotlib.mlab import PCA
 import matplotlib.cm as cm
-from matplotlib.colors import LogNorm
+from matplotlib.colors import LogNorm, NoNorm, Normalize
 import scipy.cluster.hierarchy as sch
 
 
@@ -177,7 +177,7 @@ def plotPoints2d(distList, titles, stateNames, outFile, xRange=None,
     pdf.close()
 
 def plotHeatMap(inputArray, rowNames, colNames, outFile, leftTree = False, topTree = False,
-                xLabelPosition=None, yLabelPosition=None, aspect='auto'):
+                xLabelPosition=None, yLabelPosition=None, aspect='auto', logNorm = False):
     """ from here
     http://stackoverflow.com/questions/2455761/reordering-matrix-elements-to-reflect-column-and-row-clustering-in-naiive-python
     """
@@ -188,7 +188,7 @@ def plotHeatMap(inputArray, rowNames, colNames, outFile, leftTree = False, topTr
     width=10
     height= 9
     sX = -0.15
-    sY = 0.0
+    sY = 0.15
     pdf = pltBack.PdfPages(outFile)
     fig = plt.figure(figsize=(width, height))
     #print array
@@ -226,11 +226,15 @@ def plotHeatMap(inputArray, rowNames, colNames, outFile, leftTree = False, topTr
         array = array[:,idx2]
         colNames = list(np.array(colNames)[idx2])
     # picture of built-in colormaps http://wiki.scipy.org/Cookbook/Matplotlib/Show_colormaps
+    if logNorm is True:
+        norm = LogNorm(vmin=1e-10, vmax=1.0)
+    else:
+        norm = Normalize(vmin=0.0, vmax=1.0)
     im = axmatrix.matshow(array,
                           #interpolation='nearest',
                           aspect=aspect,
                           #origin='lower',
-                          cmap=plt.cm.YlGnBu)#, norm=LogNorm())
+                          cmap=plt.cm.YlGnBu, norm=norm)
 
     #axmatrix.set_xticks([])
     #axmatrix.set_yticks([])
