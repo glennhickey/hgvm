@@ -5,12 +5,14 @@ Run vg compare on a bunch of graphs and make a table on how there kmer sets matc
 
 import argparse, sys, os, os.path, random, subprocess, shutil, itertools, glob
 import doctest, re, json, collections, time, timeit, string
+from collections import defaultdict
 from operator import sub
 from toil.job import Job
 from toillib import RealTimeLogger, robust_makedirs
 from callVariants import sample_vg_path, augmented_vg_path, alignment_region_tag, alignment_graph_tag
-from callVariants import graph_path, index_path, augmented_vg_path, linear_vg_path, linear_vcf_path
+from callVariants import graph_path, index_path, augmented_vg_path, linear_vg_path, linear_vcf_path, sample_vg_path
 from callVariants import alignment_region_tag
+from clusterGraphs import comp_path
 
 def parse_args(args):
     parser = argparse.ArgumentParser(description=__doc__, 
@@ -39,11 +41,21 @@ def parse_args(args):
     parser.add_argument("--edge_max", type=int, default=7,
                         help="edge-max parameter for vg kmer index")
     parser.add_argument("--vg_cores", type=int, default=1,
-                        help="number of cores to give to vg commands")    
-                        
+                        help="number of cores to give to vg commands")
+    parser.add_argument("--avg_samples", action="store_true", default=False,
+                        help="Average samples into mean value")
+    parser.add_argument("--dir_tag", action="store_true", default=False,
+                         help="Use directory of graph as name tag")
+    parser.add_argument("--orig_tag", type=str, default="graphs",
+                        help="When dir_tag used, change this tag to original")
+
+    parser.add_argument("--out_sub", type=str, default="",
+                        help="make a subfolder with this name for output")
+                            
     args = args[1:]
         
     return parser.parse_args(args)
+
 
 def index_path(graph, options):
     """ get the path of the index given the graph
@@ -53,7 +65,10 @@ def index_path(graph, options):
 def compare_out_path(options):
     """ get root output dir for comparison output
     """
-    return os.path.join(options.out_dir, "compare")
+    tag = "compare"
+    if len(options.out_sub) > 0:
+        tag += "/" + options.out_sub
+    return os.path.join(options.out_dir, tag)
 
 def json_out_path(options):
     """ where to put the json compareison output
@@ -76,6 +91,10 @@ def count_tsv_path(options):
     return os.path.join(compare_out_path(options),
                         "call_count_{}.tsv".format(options.baseline))
 
+def size_tsv_path(options):
+    return os.path.join(compare_out_path(options),
+                        "call_size_{}.tsv".format(options.baseline))
+
 def baseline_path(gam, options):
     """ put together path for baseline graph 
     """
@@ -86,25 +105,6 @@ def baseline_path(gam, options):
         dbtag = ""
     return os.path.join(options.graph_dir,
                         "{}-{}{}.vg".format(options.baseline, region, dbtag))
-
-def comparison_path(baseline, graph, options):
-    """ get a unique path, in the temporary folder, for
-    json comparison output of two graphs.  note that graph
-    filename may not be unique, so we extract some tags out of its path
-    """
-    bname = os.path.splitext(os.path.basename(baseline))[0]
-    gname = os.path.splitext(os.path.basename(graph))[0]
-    try:
-        region_tag = alignment_region_tag(graph, options)
-    except:
-        region_tag = ""
-    try:
-        graph_tag = alignment_graph_tag(graph, options)
-    except:
-        graph_tag = ""
-    
-    return os.path.join(json_out_path(options), "{}{}{}{}.json".format(
-        bname, graph_tag, region_tag, gname))
     
 def compute_kmer_index(job, graph, options):
     """ run vg index (if necessary) and vg compare on the input
@@ -129,7 +129,7 @@ def compute_comparison(job, baseline, graph, options):
     baseline_index_path = index_path(baseline, options)
     assert os.path.exists(baseline_index_path)
 
-    out_path = comparison_path(baseline, graph, options)
+    out_path = comp_path(baseline, graph, options)
     do_comp = options.overwrite or not os.path.exists(out_path)
     
     if do_comp:        
@@ -222,28 +222,33 @@ def dist_table(options):
     json files
     """
     # tsv header
-    dist_table =  "#\t{}\t\t\t\t\n".format(options.baseline)
-    dist_table += "#graph\tgraph_dist\tlinear_dist\taugmented_dist\tdelta_linear\tdelta_augmented\n"
+    dist_table =  "#\t{}\t\t\t\t\\t\tn".format(options.baseline)
+    dist_table += "#graph\tgraph_dist\tlinear_dist\taugmented_dist\tsample_dist\tdelta_linear\tdelta_augmented\tdelta_sample\n"
     
     for gam in options.in_gams:
         baseline = baseline_path(gam, options)
-        comp_path = comparison_path(baseline, graph_path(gam, options), options)
-        graph_dist = jaccard_dist(comp_path)
-        aug_comp_path = comparison_path(baseline, augmented_vg_path(gam, options), options)
+        graph_comp_path = comp_path(baseline, graph_path(gam, options), options)
+        graph_dist = jaccard_dist(graph_comp_path)
+        aug_comp_path = comp_path(baseline, augmented_vg_path(gam, options), options)
         aug_graph_dist = jaccard_dist(aug_comp_path)
-        lin_comp_path = comparison_path(baseline, linear_vg_path(gam, options), options)
+        lin_comp_path = comp_path(baseline, linear_vg_path(gam, options), options)
         lin_graph_dist = jaccard_dist(lin_comp_path)
+        sam_comp_path = comp_path(baseline, sample_vg_path(gam, options), options)
+        sam_graph_dist = jaccard_dist(sam_comp_path)        
 
         delta_lin = lin_graph_dist - graph_dist
         delta_aug = aug_graph_dist - graph_dist
+        delta_sam = sam_graph_dist - graph_dist
 
-        dist_table += "{}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\n".format(
+        dist_table += "{}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\n".format(
             os.path.splitext(os.path.basename(graph_path(gam, options)))[0],
             graph_dist,
             lin_graph_dist,
             aug_graph_dist,
+            sam_graph_dist,
             delta_lin,
-            delta_aug)
+            delta_aug,
+            delta_sam)
 
     with open(dist_tsv_path(options), "w") as ofile:
         ofile.write(dist_table)
@@ -254,34 +259,61 @@ def acc_table(options):
     json files
     """
     # tsv header
-    acc_table =  "#\t{}\t\t\t\t\t\t\t\t\t\t\t\t\n".format(options.baseline)
+    acc_table =  "#\t{}\t\t\t\t\t\t\t\t\t\n".format(options.baseline)
     acc_table += "#graph\tgraph_prec\tgraph_rec\tgraph_f1"
     acc_table += "\tlinear_prec\tlinear_rec\tlinear_f1"
     acc_table += "\taugmented_prec\taugmented_rec\taugmented_f1"
-    acc_table += "\tprec_delta_linear\trec_delta_linear\tf1_delta_linear"
-    acc_table += "\tprec_delta_augmented\trec_delta_augmented\tf1_delta_augmented\n"
+    acc_table += "\tsample_prec\tsample_rec\tsample_f1"
+
+    sums = defaultdict(lambda : (0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.))
+    counts = defaultdict(lambda : 0.)
     
     for gam in options.in_gams:
         baseline = baseline_path(gam, options)
-        comp_path = comparison_path(baseline, graph_path(gam, options), options)
-        graph_acc = accuracy(comp_path)
-        aug_comp_path = comparison_path(baseline, augmented_vg_path(gam, options), options)
+        graph_comp_path = comp_path(baseline, graph_path(gam, options), options)
+        graph_acc = accuracy(graph_comp_path)
+        aug_comp_path = comp_path(baseline, augmented_vg_path(gam, options), options)
         aug_graph_acc = accuracy(aug_comp_path)
-        lin_comp_path = comparison_path(baseline, linear_vg_path(gam, options), options)
+        lin_comp_path = comp_path(baseline, linear_vg_path(gam, options), options)
         lin_graph_acc = accuracy(lin_comp_path)
+        sam_comp_path = comp_path(baseline, sample_vg_path(gam, options), options)
+        sam_graph_acc = accuracy(sam_comp_path)
 
-        delta_lin_acc = map(sub, lin_graph_acc, graph_acc)
-        delta_aug_acc = map(sub, aug_graph_acc, graph_acc)
+        name = graph_path(gam, options)
 
+        sums[name] = (sums[name][0] +  graph_acc[0],
+                      sums[name][1] +  graph_acc[1],
+                      sums[name][2] +  graph_acc[2],
+                      sums[name][3] +  lin_graph_acc[0],
+                      sums[name][4] +  lin_graph_acc[1],
+                      sums[name][5] +  lin_graph_acc[2],
+                      sums[name][6] +  aug_graph_acc[0],
+                      sums[name][7] +  aug_graph_acc[1],
+                      sums[name][8] +  aug_graph_acc[2],
+                      sums[name][9] +  sam_graph_acc[0],
+                      sums[name][10] + sam_graph_acc[1],
+                      sums[name][11] + sam_graph_acc[2])
+
+        counts[name] = counts[name] + 1
+        
+    for name in list(set(map(lambda x : graph_path(x, options), options.in_gams))):
         acc_table += "{}\t{:.4}\t{:.4}\t{:.4}\t".format(
             os.path.splitext(os.path.basename(graph_path(gam, options)))[0],
-            graph_acc[0], graph_acc[1], graph_acc[2])
+            float(sums[name][0]) / float(counts[name]),
+            float(sums[name][1]) / float(counts[name]),
+            float(sums[name][2]) / float(counts[name]))
+        
         acc_table += "{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t".format(
-            lin_graph_acc[0], lin_graph_acc[1], lin_graph_acc[2],
-            aug_graph_acc[0], aug_graph_acc[1], aug_graph_acc[2])
-        acc_table +="{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\n".format(
-            delta_lin_acc[0], delta_lin_acc[1], delta_lin_acc[2],
-            delta_aug_acc[0], delta_aug_acc[1], delta_aug_acc[2])
+            float(sums[name][3]) / float(counts[name]),
+            float(sums[name][4]) / float(counts[name]),
+            float(sums[name][5]) / float(counts[name]),
+            float(sums[name][6]) / float(counts[name]),
+            float(sums[name][7]) / float(counts[name]),
+            float(sums[name][8]) / float(counts[name]))
+        acc_table +="{:.4}\t{:.4}\t{:.4}\n".format(
+            float(sums[name][9]) / float(counts[name]),
+            float(sums[name][10]) / float(counts[name]),
+            float(sums[name][11]) / float(counts[name]))
 
     with open(acc_tsv_path(options), "w") as ofile:
         ofile.write(acc_table)
@@ -296,6 +328,9 @@ def snp_count_table(options):
     count_table =  "#\t{}\t\n".format(options.baseline)
     count_table += "#graph\tlinear_snp_count\tsample_snp_count\taugmented_snp_count\n"
 
+    sums = defaultdict(lambda : (0,0,0))
+    counts = defaultdict(lambda : 0)
+
     for gam in options.in_gams:
         linear_vcf = linear_vcf_path(gam, options) + ".gz"
         vg_sample = sample_vg_path(gam, options)
@@ -304,11 +339,22 @@ def snp_count_table(options):
         sample_snps = count_vg_paths(vg_sample, options)
         augmented_snps = count_vg_paths(vg_augmented, options)
 
+        name = graph_path(gam, options)
+
+        sums[name] = (sums[name][0] + vcf_snps,
+                      sums[name][1] + sample_snps,
+                      sums[name][2] + augmented_snps)
+        counts[name] = counts[name] + 1
+
+    for name in list(set(map(lambda x : graph_path(x, options), options.in_gams))):
+        avg_vcf = float(sums[name][0]) / float(counts[name])
+        avg_sam = float(sums[name][1]) / float(counts[name])
+        avg_aug = float(sums[name][2]) / float(counts[name])
         count_table +="{}\t{}\t{}\t{}\n".format(
-            graph_path(gam, options),
-            vcf_snps,
-            sample_snps,
-            augmented_snps)
+            os.path.splitext(os.path.basename(name))[0],
+            avg_vcf,
+            avg_sam,
+            avg_aug)
 
     with open(count_tsv_path(options), "w") as ofile:
         ofile.write(count_table)
@@ -317,28 +363,36 @@ def graph_size_table(options):
     """ make a table of sequence lengths for the vg call outputs
     """
     # tsv header
-    count_table =  "#\t{}\t\n".format(options.baseline)
-    count_table += "#graph\tgraph_length\tsample_seq_length\taugmented_length\n"
+    length_table =  "#\t{}\t\n".format(options.baseline)
+    length_table += "#graph\tsample_snp_length\taugmented_snp_length\n"
+
+    sums = defaultdict(lambda : (0,0))
+    counts = defaultdict(lambda : 0)
 
     for gam in options.in_gams:
         linear_vcf = linear_vcf_path(gam, options) + ".gz"
         vg_sample = sample_vg_path(gam, options)
         vg_augmented = augmented_vg_path(gam, options)
-        original = graph_path(gam, options)
+        sample_snps = vg_length(vg_sample, options)
+        augmented_snps = vg_length(vg_augmented, options)
 
-        original_length = vg_length(original, options)
-        sample_length = vg_length(vg_sample, options)
-        augmented_length = vg_length(vg_augmented, options)
+        name = graph_path(gam, options)
 
-        count_table +="{}\t{}\t{}\t{}\n".format(
-            graph_path(gam, options),
-            original_length,
-            sample_length,
-            augmented_length)
+        sums[name] = (sums[name][0] + sample_snps,
+                      sums[name][1] + augmented_snps)
+        counts[name] = counts[name] + 1
 
-    with open(count_tsv_path(options), "w") as ofile:
-        ofile.write(count_table)
-    
+    for name in list(set(map(lambda x : graph_path(x, options), options.in_gams))):
+        avg_sam = float(sums[name][0]) / float(counts[name])
+        avg_aug = float(sums[name][1]) / float(counts[name])
+        length_table +="{}\t{}\t{}\n".format(
+            os.path.splitext(os.path.basename(name))[0],
+            avg_sam,
+            avg_aug)
+
+    with open(size_tsv_path(options), "w") as ofile:
+        ofile.write(length_table)
+
     
 def compute_all_comparisons(job, options):
     """ run vg compare in parallel on all the graphs,
