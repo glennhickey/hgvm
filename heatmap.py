@@ -227,7 +227,7 @@ def plotHeatMap(inputArray, rowNames, colNames, outFile, leftTree = False, topTr
         colNames = list(np.array(colNames)[idx2])
     # picture of built-in colormaps http://wiki.scipy.org/Cookbook/Matplotlib/Show_colormaps
     if logNorm is True:
-        norm = LogNorm(vmin=1e-10, vmax=1.0)
+        norm = LogNorm(vmax=1.0)
     else:
         norm = Normalize(vmin=0.0, vmax=1.0)
     im = axmatrix.matshow(array,
