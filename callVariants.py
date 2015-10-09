@@ -50,6 +50,11 @@ def parse_args(args):
                         " [TODO: support different ref versions?]" )
     parser.add_argument("--vg_cores", type=int, default=1,
                         help="number of cores to give to vg commands")
+    parser.add_argument("--vg_only", action="store_true", default=False,
+                        help="only do vg call. skip samptools linear call")
+    parser.add_argument("--skip", type=str, default="",
+                        help="comma-separated list of keywords that "
+                        "will cause input gam to be skipped if found in path")
     
     args = args[1:]
         
@@ -138,7 +143,7 @@ def sample_vg_path(alignment_path, options, tag=""):
     """ get vg call output name from input gam
     """
     name = os.path.splitext(os.path.basename(alignment_path))[0]
-    name += "_sample_{}.vg".format(tag)
+    name += "{}_sample.vg".format(tag)
     return os.path.join(out_dir(alignment_path, options), name)
 
 def augmented_vg_path(alignment_path, options, tag=""):
@@ -247,7 +252,7 @@ def compute_vg_variants(job, input_gam, options):
     """
     input_graph_path = graph_path(input_gam, options)
     out_pileup_path = pileup_path(input_gam, options)
-    out_sample_vg_path = sample_path(input_gam, options)
+    out_sample_vg_path = sample_vg_path(input_gam, options)
     out_augmented_vg_path = augmented_vg_path(input_gam, options)
 
     do_pu = options.overwrite or not os.path.isfile(out_pileup_path)
@@ -266,17 +271,17 @@ def compute_vg_variants(job, input_gam, options):
 
     if do_call:
         robust_makedirs(os.path.dirname(out_sample_vg_path))
-        run("vg call {} {} -r 0.001 -d 65 -e 115 -s 30 -t {} > {}".format(input_graph_path,
-                                                                          out_pileup_path,
-                                                                          options.vg_cores,
-                                                                          out_sample_vg_path))
+        run("vg call {} {} -r 0.001 -d 65 -e 115 -s 30 -t {} | vg ids -c - | vg ids -s -  > {}".format(input_graph_path,
+                                                                                                       out_pileup_path,
+                                                                                                       options.vg_cores,
+                                                                                                       out_sample_vg_path))
 
     if do_aug:
         robust_makedirs(os.path.dirname(out_augmented_vg_path))
-        run("vg call {} {} -r 0.001 -d 65 -e 115 -s 30 -t {} -l > {}".format(input_graph_path,
-                                                                          out_pileup_path,
-                                                                          options.vg_cores,
-                                                                          out_augmented_vg_path))
+        run("vg call {} {} -r 0.001 -d 65 -e 115 -s 30 -t {} -l | vg ids -c - | vg ids -s - > {}".format(input_graph_path,
+                                                                                                         out_pileup_path,
+                                                                                                         options.vg_cores,
+                                                                                                         out_augmented_vg_path))
 
 def call_variants(job, options):
     """ run everything (root toil job)
@@ -284,8 +289,9 @@ def call_variants(job, options):
     for input_gam in options.in_gams:
         job.addChildJobFn(compute_vg_variants, input_gam, options,
                           cores=options.vg_cores)
-        job.addChildJobFn(compute_linear_variants, input_gam, options,
-                          cores=options.vg_cores)
+        if not options.vg_only:
+            job.addChildJobFn(compute_linear_variants, input_gam, options,
+                              cores=options.vg_cores)
     
     
 def main(args):
@@ -293,6 +299,17 @@ def main(args):
     options = parse_args(args) 
     
     RealTimeLogger.start_master()
+
+    filtered_gams = []
+    skip_words = options.skip.split(",")
+    for gam in options.in_gams:
+        skip_gam = False
+        for word in skip_words:
+            if len(word) > 0 and word in gam:
+                skip_gam = True
+        if not skip_gam:
+            filtered_gams.append(gam)
+    options.in_gams = filtered_gams
 
     for gam in options.in_gams:
         if len(gam.split("/")) < 3 or os.path.splitext(gam)[1] != ".gam":
