@@ -32,6 +32,20 @@ do
 		  cp ${OUT_DIR}/${i}/${j} ${OUT_DIR}/${i}/${i}_${j}
 	 done
 
+	 rm -rf blon123 ; ./clusterGraphs.py ./blon123 ${GRAPHS}/*${i}*.vg ${VARIANTS}/${i}/*/*augmented*.vg ${OUT_DIR}/${i} ${OPTS} --avg_sample
+
+	 for j in heatmap.pdf heatmap_log.pdf tree.dot  tree.newick  tree.png
+	 do
+		  cp ${OUT_DIR}/${i}/${j} ${OUT_DIR}/${i}/augmented_${i}_avg_${j}
+	 done
+
+	 rm -rf blon123 ; ./clusterGraphs.py ./blon123 ${VARIANTS}/${i}/*/*augmented*.vg ${VARIANTS}/${i}/*/*sample*.vg ${OUT_DIR}/${i} ${OPTS} --avg_sample
+
+	 for j in heatmap.pdf heatmap_log.pdf tree.dot  tree.newick  tree.png
+	 do
+		  cp ${OUT_DIR}/${i}/${j} ${OUT_DIR}/${i}/sample_${i}_avg_${j}
+	 done
+
 	 rm -rf blon333 ; ./compareCalls.py ./blon333 ${BASELINE} ${ALIGNMENTS}/${i}/*/*.gam --out_dir ${VARIANTS} --avg_sample --out_sub $i ${OPTS}
 
 	 cp ${VARIANTS}/compare/${i}/*.tsv ${OUT_DIR}/${i}
