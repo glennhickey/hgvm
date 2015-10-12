@@ -343,7 +343,7 @@ def main(args):
         # Add in our horizontal mean line
         
         # Compute the mean
-        category_mean = numpy.median(categories[options.hline_median])
+        category_median = numpy.median(categories[options.hline_median])
         
         # Find the color
         line_color = 'r'
@@ -352,7 +352,30 @@ def main(args):
                 line_color = category_colors[i]
                 break
         
-        pyplot.axhline(y=category_mean, color=line_color, linestyle='--')
+        pyplot.axhline(y=category_median, color=line_color, linestyle='--')
+        
+        # We want to mark the best thing with its percent deviation
+        best_category = None
+        best_deviation = None
+        
+        for i, category in enumerate(category_order):
+            # Apply a +/- median difference percentage to the label
+            
+            other_median = numpy.median(categories[category])
+            
+            portion = other_median / category_median
+            
+            percent = (portion - 1) * 100
+            
+            if best_deviation is None or percent > best_deviation:
+                # We found the best thing
+                best_category = i
+                best_deviation = percent
+        
+        if best_category is not None:
+            # Apply a +/-% label to the best thing
+            category_labels[best_category] += "\n({:+.2f}%)".format(
+                best_deviation)
         
     # StackOverflow provides us with font sizing
     # http://stackoverflow.com/questions/3899980/how-to-change-the-font-size-on-a-matplotlib-plot
