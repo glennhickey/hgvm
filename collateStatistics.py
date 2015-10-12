@@ -177,6 +177,9 @@ def collate_region(job, options, region):
             if runtime is None:
                 # We need NaN floats if there's no runtime
                 runtime = float("nan")
+            else:
+                # Convert to time per read aligned
+                runtime /= total_reads
             
             # What portion are single-mapped?
             portion_single_mapped = (total_mapped - total_multimapped) / float(

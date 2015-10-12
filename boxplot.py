@@ -8,7 +8,7 @@ Re-uses sample code and documentation from
 """
 
 import argparse, sys, os, itertools, math, collections, re
-import matplotlib, matplotlib.ticker, matplotlib.lines
+import matplotlib, matplotlib.ticker, matplotlib.lines, numpy
 
 # Implementation of "natural" sorting from
 # <http://stackoverflow.com/a/5967539/402891>
@@ -69,6 +69,8 @@ def parse_args(args):
         help="log Y axis")
     parser.add_argument("--hline", type=float, default=None,
         help="draw a horizontal line at the given Y value")
+    parser.add_argument("--hline_median", default=None,
+        help="draw a horizontal line at the median of the given category")
     parser.add_argument("--font_size", type=int, default=12,
         help="the font size for text")
     parser.add_argument("--save",
@@ -336,6 +338,21 @@ def main(args):
     if options.hline is not None:
         # Add in our horizontal line that the user asked for.
         pyplot.axhline(y=options.hline, color='r', linestyle='--')
+        
+    if options.hline_median is not None:
+        # Add in our horizontal mean line
+        
+        # Compute the mean
+        category_mean = numpy.median(categories[options.hline_median])
+        
+        # Find the color
+        line_color = 'r'
+        for i in xrange(len(category_colors)):
+            if category_order[i] == options.hline_median:
+                line_color = category_colors[i]
+                break
+        
+        pyplot.axhline(y=category_mean, color=line_color, linestyle='--')
         
     # StackOverflow provides us with font sizing
     # http://stackoverflow.com/questions/3899980/how-to-change-the-font-size-on-a-matplotlib-plot

@@ -894,8 +894,10 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
         # Add a child to actually save the graph to the output. Hack our own job
         # so that the actual alignment targets get added as a child of this, so
         # they happen after. TODO: massive hack!
-        job = job.addChildJobFn(save_indexed_graph, options, index_dir_id,
+        job.addChildJobFn(save_indexed_graph, options, index_dir_id,
             index_key, cores=1, memory="10G", disk="50G")
+            
+    RealTimeLogger.get().info("Done making children")
                     
     for sample in samples_to_run:
         # Split out over each sample that needs to be run
