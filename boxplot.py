@@ -84,9 +84,11 @@ def parse_args(args):
     parser.add_argument("--x_sideways", action="store_true",
         help="write X axis labels vertically")
     parser.add_argument("--min", type=float, default=None,
-        help="minimum value allowed")
+        help="minimum Y allowed")
     parser.add_argument("--max", type=float, default=None,
-        help="maximum value allowed")
+        help="maximum Y value")
+    parser.add_argument("--max_max", type=float, default=None,
+        help="limit on maximum Y value")
     parser.add_argument("--means", action="store_true",
         help="include means for each category")
     parser.add_argument("--no_n", dest="show_n", action="store_false",
@@ -149,6 +151,9 @@ def main(args):
     # floats in that category.
     categories = collections.defaultdict(list)
     
+    max_found = None
+    min_found = None
+    
     for line in options.data:
         # Unpack and parse the two numbers on this line (category and value)
         parts = line.strip().split('\t')
@@ -173,6 +178,14 @@ def main(args):
         if options.max is not None and value > options.max:
             # Throw out values that are too large
             continue
+            
+        if max_found is None or value > max_found:
+            # Track the max value we find
+            max_found = value
+            
+        if min_found is None or value < min_found:
+            # Track the min value we find
+            min_found = value
         
         # Put each in the appropriate list.
         categories[category].append(value)
@@ -391,6 +404,10 @@ def main(args):
     # Label the columns with the appropriate text. Account for 1-based ticks.
     pyplot.xticks(xrange(1, len(category_labels) + 1), category_labels, 
         rotation=90 if options.x_sideways else 0)
+    
+    if options.max_max < max_found:
+        # Bring in the upper limit
+        pyplot.ylim((pyplot.ylim()[0], options.max_max))
     
     if options.min is not None:
         # Set only the lower y limit

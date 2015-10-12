@@ -89,8 +89,8 @@ do
         
     ./boxplot.py "${RUNTIME_FILE}" \
         --title "$(printf "Per-read runtime\n in ${REGION^^}")" \
-        --x_label "Graph" --y_label "Runtime per sample (seconds)" --save "${RUNTIME_PLOT}" \
-        --x_sideways --max 0.01 \
+        --x_label "Graph" --y_label "Runtime per read (seconds)" --save "${RUNTIME_PLOT}" \
+        --x_sideways --max_max 0.006 \
         "${PLOT_PARAMS[@]}"
     
 done
