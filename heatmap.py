@@ -177,7 +177,8 @@ def plotPoints2d(distList, titles, stateNames, outFile, xRange=None,
     pdf.close()
 
 def plotHeatMap(inputArray, rowNames, colNames, outFile, leftTree = False, topTree = False,
-                xLabelPosition=None, yLabelPosition=None, aspect='auto', logNorm = False):
+                xLabelPosition=None, yLabelPosition=None, aspect='auto', logNorm = False,
+                vmax=None):
     """ from here
     http://stackoverflow.com/questions/2455761/reordering-matrix-elements-to-reflect-column-and-row-clustering-in-naiive-python
     """
@@ -227,9 +228,9 @@ def plotHeatMap(inputArray, rowNames, colNames, outFile, leftTree = False, topTr
         colNames = list(np.array(colNames)[idx2])
     # picture of built-in colormaps http://wiki.scipy.org/Cookbook/Matplotlib/Show_colormaps
     if logNorm is True:
-        norm = LogNorm(vmax=1.0)
+        norm = LogNorm(vmax=vmax)
     else:
-        norm = Normalize(vmin=0.0, vmax=1.0)
+        norm = Normalize(vmin=0.0, vmax=vmax)
     im = axmatrix.matshow(array,
                           #interpolation='nearest',
                           aspect=aspect,

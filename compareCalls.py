@@ -50,6 +50,9 @@ def parse_args(args):
                         help="When dir_tag used, change this tag to original")
     parser.add_argument("--out_sub", type=str, default="",
                         help="make a subfolder with this name for output")
+    parser.add_argument("--only_summary", action="store_true", default=False,
+                        help="Only generate summary output.  Do not do any"
+                        " compute")    
                             
     args = args[1:]
         
@@ -375,9 +378,9 @@ def graph_size_table(options):
     """
     # tsv header
     length_table =  "#\t{}\t\n".format(options.baseline)
-    length_table += "#graph\tsample_snp_length\taugmented_snp_length\n"
+    length_table += "#graph\tsample_snp_length\taugmented_snp_length\toriginal_length\n"
 
-    sums = defaultdict(lambda : (0,0))
+    sums = defaultdict(lambda : (0,0,0))
     counts = defaultdict(lambda : 0)
 
     for gam in options.in_gams:
@@ -386,20 +389,25 @@ def graph_size_table(options):
         vg_augmented = augmented_vg_path(gam, options)
         sample_snps = vg_length(vg_sample, options)
         augmented_snps = vg_length(vg_augmented, options)
+        vg_original = graph_path(gam, options)
+        original_snps = vg_length(vg_original, options)
 
         name = graph_path(gam, options)
 
         sums[name] = (sums[name][0] + sample_snps,
-                      sums[name][1] + augmented_snps)
+                      sums[name][1] + augmented_snps,
+                      sums[name][2] + original_snps)
         counts[name] = counts[name] + 1
 
     for name in list(set(map(lambda x : graph_path(x, options), options.in_gams))):
         avg_sam = float(sums[name][0]) / float(counts[name])
         avg_aug = float(sums[name][1]) / float(counts[name])
-        length_table +="{}\t{}\t{}\n".format(
+        avg_ori = float(sums[name][2]) / float(counts[name])
+        length_table +="{}\t{}\t{}\t{}\n".format(
             os.path.splitext(os.path.basename(name))[0],
             avg_sam,
-            avg_aug)
+            avg_aug,
+            avg_ori)
 
     with open(size_tsv_path(options), "w") as ofile:
         ofile.write(length_table)
@@ -465,7 +473,10 @@ def main(args):
         cores=1, memory="2G", disk=0)
     
     # Run it and see how many jobs fail
-    failed_jobs = Job.Runner.startToil(root_job,  options)
+    if not options.only_summary:
+        failed_jobs = Job.Runner.startToil(root_job,  options)
+    else:
+        failed_jobs = 0
     
     if failed_jobs > 0:
         raise Exception("{} jobs failed!".format(failed_jobs))
@@ -473,8 +484,8 @@ def main(args):
     RealTimeLogger.stop_master()
 
     # make some tables from the json comparison output
-    dist_table(options)
-    acc_table(options)
+    #dist_table(options)
+    #acc_table(options)
     snp_count_table(options)
     graph_size_table(options)
     

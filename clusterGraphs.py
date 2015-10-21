@@ -44,6 +44,9 @@ def parse_args(args):
                          help="Use directory of graph as name tag")
     parser.add_argument("--orig_tag", type=str, default="graphs",
                         help="When dir_tag used, change this tag to original")
+    parser.add_argument("--only_summary", action="store_true", default=False,
+                        help="Only generate summary output.  Do not do any"
+                        " compute")
                             
     args = args[1:]
 
@@ -257,6 +260,20 @@ def compute_heatmap(options, mat, names):
                 topTree=True,
                 logNorm=True)
 
+    plotHeatMap(array_mat, names, names,
+                heatmap_path(options, "_vm1"),
+                leftTree=True,
+                topTree=True,
+                logNorm=False,
+                vmax=1.0)
+
+    plotHeatMap(array_mat, names, names,
+                heatmap_path(options, "_log_vm1"),
+                leftTree=True,
+                topTree=True,
+                logNorm=True,
+                vmax=1.0)
+
 
 def cluster_comparisons(options):
     """ write a (tsv) distance matrix
@@ -325,7 +342,10 @@ def main(args):
         cores=1, memory="2G", disk=0)
     
     # Run it and see how many jobs fail
-    failed_jobs = Job.Runner.startToil(root_job,  options)
+    if not options.only_summary:
+        failed_jobs = Job.Runner.startToil(root_job,  options)
+    else:
+        failed_jobs = 0
     
     if failed_jobs > 0:
         raise Exception("{} jobs failed!".format(failed_jobs))
