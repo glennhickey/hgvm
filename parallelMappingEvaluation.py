@@ -291,6 +291,15 @@ class IOStore(object):
         
         raise NotImplementedError()
         
+    def exists(self, path):
+        """
+        Returns true if the given input or output file exists in the store
+        already.
+        
+        """
+        
+        raise NotImplementedError()
+        
     @staticmethod
     def get(store_string):
         """
@@ -414,6 +423,15 @@ class FileIOStore(IOStore):
         
         # These are small so we just make copies
         shutil.copy2(local_path, real_output_path)
+        
+    def exists(self, path):
+        """
+        Returns true if the given input or output file exists in the file system
+        already.
+        
+        """
+        
+        return os.path.exists(os.path.join(self.path_prefix, path))
             
 class AzureIOStore(IOStore):
     """
@@ -587,6 +605,37 @@ class AzureIOStore(IOStore):
         # TODO: catch no container error here, make the container, and retry
         self.connection.put_block_blob_from_path(self.container_name,
             self.name_prefix + output_path, local_path)
+            
+    def exists(self, path):
+        """
+        Returns true if the given input or output file exists in Azure already.
+        
+        """
+        
+        self.__connect()
+        
+        marker = None
+        
+        while True:
+        
+            # Get the results from Azure.
+            result = self.connection.list_blobs(self.container_name, 
+                prefix=self.name_prefix + path, marker=marker)
+                
+            for blob in result:
+                # Look at each blob
+                
+                if blob.name == self.name_prefix + path:
+                    # Found it
+                    return True
+                
+            # Save the marker
+            marker = result.next_marker
+                
+            if not marker:
+                break 
+        
+        return False
 
 ###END TOILLIB
 
@@ -629,6 +678,10 @@ def parse_args(args):
     parser.add_argument("--bin_url",
         default="https://hgvm.blob.core.windows.net/hgvm-bin",
         help="URL to download sg2vg and vg binaries from, without Docker")
+    parser.add_argument("--overwrite", default=False, action="store_true",
+        help="overwrite existing result files")
+    parser.add_argument("--reindex", default=False, action="store_true",
+        help="don't re-use existing indexed graphs")
     
     # The command line arguments start with the program name, which we don't
     # want to treat as an argument for argparse. So we remove it.
@@ -717,7 +770,6 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
     bin_dir = "{}/bin".format(job.fileStore.getLocalTempDir())
     read_global_directory(job.fileStore, bin_dir_id, bin_dir)
     
-    
     # Get graph basename (last URL component) from URL
     basename = re.match(".*/(.*)/$", url).group(1)
         
@@ -725,60 +777,6 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
     graph_name = basename.replace("-{}".format(region), "").replace(
         "{}-".format(region), "")
     
-    # Make the real URL with the version
-    versioned_url = url + options.server_version
-    
-    # Work out where the graph goes
-    # it will be graph.vg in here
-    graph_dir = "{}/graph".format(job.fileStore.getLocalTempDir())
-    robust_makedirs(graph_dir)
-    
-    graph_filename = "{}/graph.vg".format(graph_dir)
-    
-    # Download and fix up the graph with this ugly subprocess pipeline
-    # sg2vg "${URL}" -u | vg view -Jv - | vg mod -X 100 - | vg ids -s - > "graphs/${BASENAME}.vg"
-    
-    with open(graph_filename, "w") as output_file:
-    
-        RealTimeLogger.get().info("Downloading {} to {}".format(versioned_url,
-            graph_filename))
-    
-        # Hold all the popen objects we need for this
-        tasks = []
-        
-        # Do the download
-        tasks.append(subprocess.Popen(["{}/sg2vg".format(bin_dir),
-            versioned_url, "-u"], stdout=subprocess.PIPE))
-        
-        # Pipe through zcat
-        tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "view", "-Jv",
-            "-"], stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
-        
-        # And cut
-        tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "mod", "-X100",
-            "-"], stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
-            
-        # And uniq
-        tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "ids", "-s",
-            "-"], stdin=tasks[-1].stdout, stdout=output_file))
-            
-        # Did we make it through all the tasks OK?
-        for task in tasks:
-            if task.wait() != 0:
-                raise RuntimeError("Pipeline step returned {}".format(
-                    task.returncode))
-                    
-    # Now run the indexer.
-    # TODO: support both indexing modes
-    RealTimeLogger.get().info("Indexing {}".format(graph_filename))
-    subprocess.check_call(["{}/vg".format(bin_dir), "index", "-s", "-k",
-        str(options.kmer_size), "-e", str(options.edge_max), graph_filename])
-        
-    # Now save the indexed graph directory to the file store. It can be cleaned
-    # up since only our children use it.
-    index_dir_id = write_global_directory(job.fileStore, graph_dir,
-        cleanup=True)
-                    
     # Where do we look for samples for this region in the input?
     region_dir = region.upper()
     
@@ -792,25 +790,155 @@ def run_region_alignments(job, options, bin_dir_id, region, url):
     # Also for statistics
     stats_dir = "stats/{}/{}".format(region, graph_name)
     
+    # What samples haven't been done yet and need doing
+    samples_to_run = []
     
     for sample in input_samples:
         # Split out over each sample
         
-        RealTimeLogger.get().info("Queueing alignment of {} to {} {}".format(
-            sample, graph_name, region))
+        # What's the file that has to exist for us to not re-run it?
+        stats_file_key = "{}/{}.json".format(stats_dir, sample)
+        
+        if (not options.overwrite) and out_store.exists(stats_file_key):
+            # This is already done.
+            RealTimeLogger.get().info("Skipping completed alignment of "
+                "{} to {} {}".format(sample, graph_name, region))
+            continue
+        else:
+            # We need to run this sample
+            samples_to_run.append(sample)
+            
+    if len(samples_to_run) == 0 and not options.reindex:
+        # Don't bother indexing the graph if all the samples are done, and we
+        # didn't explicitly ask to do it.
+        RealTimeLogger.get().info("Nothing to align to {}".format(basename))
+        return
     
+    # Make the real URL with the version
+    versioned_url = url + options.server_version
+    
+    # Where will the indexed graph go in the output
+    index_key = "indexes/{}/{}.tar.gz".format(region, graph_name)
+    
+    if (not options.reindex) and out_store.exists(index_key):
+        # See if we have an index already available in the output store from a
+        # previous run
+        
+        RealTimeLogger.get().info("Retrieving indexed {} graph from output "
+            "store".format(basename))
+            
+        # Download the pre-made index directory
+        tgz_file = "{}/index.tar.gz".format(job.fileStore.getLocalTempDir())
+        out_store.read_input_file(index_key, tgz_file)
+        
+        # Save it to the global file store and keep around the ID.
+        # Will be compatible with read_global_directory
+        index_dir_id = job.fileStore.writeGlobalFile(tgz_file, cleanup=True)
+        
+    else:
+        # Download the graph, build the index, and store it in the output store
+    
+        # Work out where the graph goes
+        # it will be graph.vg in here
+        graph_dir = "{}/graph".format(job.fileStore.getLocalTempDir())
+        robust_makedirs(graph_dir)
+        
+        graph_filename = "{}/graph.vg".format(graph_dir)
+        
+        # Download and fix up the graph with this ugly subprocess pipeline
+        # sg2vg "${URL}" -u | vg view -Jv - | vg mod -X 100 - | 
+        # vg ids -s - > "graphs/${BASENAME}.vg"
+        
+        with open(graph_filename, "w") as output_file:
+        
+            RealTimeLogger.get().info("Downloading {} to {}".format(
+                versioned_url, graph_filename))
+        
+            # Hold all the popen objects we need for this
+            tasks = []
+            
+            # Do the download
+            tasks.append(subprocess.Popen(["{}/sg2vg".format(bin_dir),
+                versioned_url, "-u"], stdout=subprocess.PIPE))
+            
+            # Pipe through zcat
+            tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "view",
+                "-Jv", "-"], stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
+            
+            # And cut
+            tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "mod",
+                "-X100", "-"], stdin=tasks[-1].stdout, stdout=subprocess.PIPE))
+                
+            # And uniq
+            tasks.append(subprocess.Popen(["{}/vg".format(bin_dir), "ids", "-s",
+                "-"], stdin=tasks[-1].stdout, stdout=output_file))
+                
+            # Did we make it through all the tasks OK?
+            for task in tasks:
+                if task.wait() != 0:
+                    raise RuntimeError("Pipeline step returned {}".format(
+                        task.returncode))
+        
+        # Now run the indexer.
+        # TODO: support both indexing modes
+        RealTimeLogger.get().info("Indexing {}".format(graph_filename))
+        subprocess.check_call(["{}/vg".format(bin_dir), "index", "-s", "-k",
+            str(options.kmer_size), "-e", str(options.edge_max),
+            "-t", str(job.cores), graph_filename])
+            
+        # Now save the indexed graph directory to the file store. It can be
+        # cleaned up since only our children use it.
+        index_dir_id = write_global_directory(job.fileStore, graph_dir,
+            cleanup=True)
+            
+        # Add a child to actually save the graph to the output. Hack our own job
+        # so that the actual alignment targets get added as a child of this, so
+        # they happen after. TODO: massive hack!
+        job.addChildJobFn(save_indexed_graph, options, index_dir_id,
+            index_key, cores=1, memory="10G", disk="50G")
+            
+    RealTimeLogger.get().info("Done making children")
+                    
+    for sample in samples_to_run:
+        # Split out over each sample that needs to be run
+        
         # For each sample, know the FQ name
         sample_fastq = "{}/{}/{}.bam.fq".format(region_dir, sample, sample)
         
         # And know where we're going to put the output
         alignment_file_key = "{}/{}.gam".format(alignment_dir, sample)
         stats_file_key = "{}/{}.json".format(stats_dir, sample)
+        
+        RealTimeLogger.get().info("Queueing alignment of {} to {} {}".format(
+            sample, graph_name, region))
     
         # Go and bang that input fastq against the correct indexed graph.
         # Its output will go to the right place in the output store.
         job.addChildJobFn(run_alignment, options, bin_dir_id, region,
             index_dir_id, sample_fastq, alignment_file_key, stats_file_key,
             cores=16, memory="100G", disk="50G")
+            
+def save_indexed_graph(job, options, index_dir_id, output_key):
+    """
+    Save the index dir tar file in the given output key.
+    
+    Runs as a child to ensure that the global file store can actually
+    produce the file when asked (because within the same job, depending on Toil
+    guarantees, it might still be uploading).
+    
+    """
+    
+    # Set up the IO stores each time, since we can't unpickle them on Azure for
+    # some reason.
+    sample_store = IOStore.get(options.sample_store)
+    out_store = IOStore.get(options.out_store)
+    
+    # Get the tar.gz file
+    local_path = job.fileStore.readGlobalFile(index_dir_id)
+    
+    # Save it as output
+    out_store.write_output_file(local_path, output_key)
+    
    
 def run_alignment(job, options, bin_dir_id, region, index_dir_id,
     sample_fastq_key, alignment_file_key, stats_file_key):
@@ -855,7 +983,8 @@ def run_alignment(job, options, bin_dir_id, region, index_dir_id,
         
         # Plan out what to run
         vg_parts = ["{}/vg".format(bin_dir), "map", "-f", fastq_file, "-i",
-            "-n3", "-M2", "-k", str(options.kmer_size), graph_file]
+            "-n3", "-M2", "-t", str(job.cores), "-k", str(options.kmer_size),
+            graph_file]
         
         RealTimeLogger.get().info("Running VG: {}".format(" ".join(vg_parts)))
         
@@ -894,6 +1023,8 @@ def run_alignment(job, options, bin_dir_id, region, index_dir_id,
         "run_time": run_time
     }
         
+    last_alignment = None
+        
     for line in view.stdout:
         # Parse the alignment JSON
         alignment = json.loads(line)
@@ -923,6 +1054,19 @@ def run_alignment(job, options, bin_dir_id, region, index_dir_id,
                 # It's a multimapping. We can have max 1 per read, so it's a
                 # multimapped read.
                 
+                if (last_alignment is None or 
+                    last_alignment.get("name") != alignment.get("name") or 
+                    last_alignment.get("is_secondary", False)):
+                
+                    # This is a secondary alignment without a corresponding primary
+                    # alignment (which would have to be right before it given the
+                    # way vg dumps buffers
+                    raise RuntimeError("{} secondary alignment comes after "
+                        "alignment of {} instead of corresponding primary "
+                        "alignment\n".format(alignment.get("name"), 
+                        last_alignment.get("name") if last_alignment is not None 
+                        else "nothing"))
+                
                 # Log its stats as multimapped
                 stats["total_multimapped"] += 1
                 stats["secondary_scores"][score] += 1
@@ -943,6 +1087,9 @@ def run_alignment(job, options, bin_dir_id, region, index_dir_id,
             
             # Count the read by its primary alignment
             stats["total_reads"] += 1
+            
+        # Save the alignment for checking for wayward secondaries
+        last_alignment = alignment
                 
     with open(stats_file, "w") as stats_handle:
         # Save the stats as JSON
@@ -975,7 +1122,7 @@ def main(args):
     
     # Make a root job
     root_job = Job.wrapJobFn(run_all_alignments, options,
-        cores=16, memory="100G", disk="50G")
+        cores=1, memory="4G", disk="50G")
     
     # Run it and see how many jobs fail
     failed_jobs = Job.Runner.startToil(root_job,  options)

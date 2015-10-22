@@ -8,7 +8,7 @@ Re-uses sample code and documentation from
 """
 
 import argparse, sys, os, itertools, math, collections, re
-import matplotlib, matplotlib.ticker, matplotlib.lines
+import matplotlib, matplotlib.ticker, matplotlib.lines, numpy
 
 # Implementation of "natural" sorting from
 # <http://stackoverflow.com/a/5967539/402891>
@@ -69,6 +69,8 @@ def parse_args(args):
         help="log Y axis")
     parser.add_argument("--hline", type=float, default=None,
         help="draw a horizontal line at the given Y value")
+    parser.add_argument("--hline_median", default=None,
+        help="draw a horizontal line at the median of the given category")
     parser.add_argument("--font_size", type=int, default=12,
         help="the font size for text")
     parser.add_argument("--save",
@@ -82,9 +84,11 @@ def parse_args(args):
     parser.add_argument("--x_sideways", action="store_true",
         help="write X axis labels vertically")
     parser.add_argument("--min", type=float, default=None,
-        help="minimum value allowed")
+        help="minimum Y allowed")
     parser.add_argument("--max", type=float, default=None,
-        help="maximum value allowed")
+        help="maximum Y value")
+    parser.add_argument("--max_max", type=float, default=None,
+        help="limit on maximum Y value")
     parser.add_argument("--means", action="store_true",
         help="include means for each category")
     parser.add_argument("--no_n", dest="show_n", action="store_false",
@@ -147,6 +151,9 @@ def main(args):
     # floats in that category.
     categories = collections.defaultdict(list)
     
+    max_found = None
+    min_found = None
+    
     for line in options.data:
         # Unpack and parse the two numbers on this line (category and value)
         parts = line.strip().split('\t')
@@ -171,6 +178,14 @@ def main(args):
         if options.max is not None and value > options.max:
             # Throw out values that are too large
             continue
+            
+        if max_found is None or value > max_found:
+            # Track the max value we find
+            max_found = value
+            
+        if min_found is None or value < min_found:
+            # Track the min value we find
+            min_found = value
         
         # Put each in the appropriate list.
         categories[category].append(value)
@@ -337,6 +352,44 @@ def main(args):
         # Add in our horizontal line that the user asked for.
         pyplot.axhline(y=options.hline, color='r', linestyle='--')
         
+    if options.hline_median is not None:
+        # Add in our horizontal mean line
+        
+        # Compute the mean
+        category_median = numpy.median(categories[options.hline_median])
+        
+        # Find the color
+        line_color = 'r'
+        for i in xrange(len(category_colors)):
+            if category_order[i] == options.hline_median:
+                line_color = category_colors[i]
+                break
+        
+        pyplot.axhline(y=category_median, color=line_color, linestyle='--')
+        
+        # We want to mark the best thing with its percent deviation
+        best_category = None
+        best_deviation = None
+        
+        for i, category in enumerate(category_order):
+            # Apply a +/- median difference percentage to the label
+            
+            other_median = numpy.median(categories[category])
+            
+            portion = other_median / category_median
+            
+            percent = (portion - 1) * 100
+            
+            if best_deviation is None or percent > best_deviation:
+                # We found the best thing
+                best_category = i
+                best_deviation = percent
+        
+        if best_category is not None:
+            # Apply a +/-% label to the best thing
+            category_labels[best_category] += "\n({:+.2f}%)".format(
+                best_deviation)
+        
     # StackOverflow provides us with font sizing
     # http://stackoverflow.com/questions/3899980/how-to-change-the-font-size-on-a-matplotlib-plot
     matplotlib.rcParams.update({"font.size": options.font_size})
@@ -351,6 +404,10 @@ def main(args):
     # Label the columns with the appropriate text. Account for 1-based ticks.
     pyplot.xticks(xrange(1, len(category_labels) + 1), category_labels, 
         rotation=90 if options.x_sideways else 0)
+    
+    if options.max_max < max_found:
+        # Bring in the upper limit
+        pyplot.ylim((pyplot.ylim()[0], options.max_max))
     
     if options.min is not None:
         # Set only the lower y limit

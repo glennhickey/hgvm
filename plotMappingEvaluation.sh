@@ -16,10 +16,12 @@ fi
 # Set up the plot parameters
 PLOT_PARAMS=(
     --categories "cactus" "camel" "vg" "curoverse" "simons" "snp1000g" "prg" "debruijn-k31" "debruijn-k63"
-    "refonly" "trivial" "level1" "level2" "level3"
-    --category_labels "Cactus" "Camel" "VG"  "Curoverse" "Simons SNPs" "1000 GSNPs" "PRG" "k=31" "k=63"
-    "RefOnly" "Trivial" "Level1" "Level2" "Level3"
-    --colors "#5C755E" "#C19A6B" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m" "c" "b" "c" "m" "y"
+    "sbg" "refonly" "trivial" "level1" "level2" "level3"
+    --category_labels "Cactus" "Camel" "VG"  "Curoverse" "Simons" "1000 Genomes" "PRG" "k=31" "k=63"
+    "7 Bridges" "RefOnly" "Trivial" "Level1" "Level2" "Level3"
+    --colors "#5C755E" "#C19A6B" "#000099" "#31184A" "#384DA0" "k" "#353C47" "r" "m"
+    "#93AC2B" "c" "b" "c" "m" "y"
+    --font_size 20 --dpi 90 --no_n
 )
 
 # Where are the stats files
@@ -31,99 +33,96 @@ mkdir -p "${PLOTS_DIR}"
 
 # We need overall files for mapped and multimapped
 OVERALL_MAPPING_FILE="${PLOTS_DIR}/mapping.tsv"
-OVERALL_MAPPING_PLOT="${PLOTS_DIR}/mapping.png"
-OVERALL_MULTIMAPPING_FILE="${PLOTS_DIR}/multimapping.tsv"
-OVERALL_MULTIMAPPING_PLOT="${PLOTS_DIR}/multimapping.png"
+OVERALL_MAPPING_PLOT="${PLOTS_DIR}/mapping.ALL.png"
+OVERALL_PERFECT_FILE="${PLOTS_DIR}/perfect.tsv"
+OVERALL_PERFECT_PLOT="${PLOTS_DIR}/perfect.ALL.png"
+OVERALL_ONE_ERROR_FILE="${PLOTS_DIR}/oneerror.tsv"
+OVERALL_ONE_ERROR_PLOT="${PLOTS_DIR}/oneerror.ALL.png"
+OVERALL_SINGLE_MAPPING_FILE="${PLOTS_DIR}/singlemapping.tsv"
+OVERALL_SINGLE_MAPPING_PLOT="${PLOTS_DIR}/singlemapping.ALL.png"
 
-for REGION in `ls ${STATS_DIR}`
+for REGION in `ls ${PLOTS_DIR}/mapping.*.tsv | xargs -n 1 basename | sed 's/mapping.\(.*\).tsv/\1/'`
 do
     # For every region we ran
     
     # We have intermediate data files for plotting from
     MAPPING_FILE="${PLOTS_DIR}/mapping.${REGION}.tsv"
     MAPPING_PLOT="${PLOTS_DIR}/mapping.${REGION}.png"
-    MULTIMAPPING_FILE="${PLOTS_DIR}/multimapping.${REGION}.tsv"
-    MULTIMAPPING_PLOT="${PLOTS_DIR}/multimapping.${REGION}.png"
+    PERFECT_FILE="${PLOTS_DIR}/perfect.${REGION}.tsv"
+    PERFECT_PLOT="${PLOTS_DIR}/perfect.${REGION}.png"
+    ONE_ERROR_FILE="${PLOTS_DIR}/oneerror.${REGION}.tsv"
+    ONE_ERROR_PLOT="${PLOTS_DIR}/oneerror.${REGION}.png"
+    SINGLE_MAPPING_FILE="${PLOTS_DIR}/singlemapping.${REGION}.tsv"
+    SINGLE_MAPPING_PLOT="${PLOTS_DIR}/singlemapping.${REGION}.png"
     RUNTIME_FILE="${PLOTS_DIR}/runtime.${REGION}.tsv"
     RUNTIME_PLOT="${PLOTS_DIR}/runtime.${REGION}.png"
     
-    # Make them empty
-    :>"${MAPPING_FILE}"
-    :>"${MULTIMAPPING_FILE}"
-    :>"${RUNTIME_FILE}"
-    
-    
     echo "Plotting ${REGION^^}..."
     
-    for GRAPH_NAME in `ls ${STATS_DIR}/${REGION}`
-    do
-        # For every graph we ran for it
-        
-        for STATS_FILE in `ls ${STATS_DIR}/${REGION}/${GRAPH_NAME}`
-        do
-            # For each sample run, parse its JSON and add a point to the region
-            # TSV for the appropriate graph.
-            
-            # First build the path to the JSON file to look at
-            JSON_FILE="${STATS_DIR}/${REGION}/${GRAPH_NAME}/${STATS_FILE}"
-            
-            # We need to account for the well-mapped/well-multimapped identity thresholds
-            
-            # First: portion mapped with <=2 mismatches out of 100 expected length
-            printf "${GRAPH_NAME}\t" >> "${MAPPING_FILE}"
-            # We need the 0 + in case there are no sufficiently good mappings
-            cat "${JSON_FILE}" | jq -r '(0 + .primary_mismatches."0" + .primary_mismatches."1" + .primary_mismatches."2") / .total_reads' >> "${MAPPING_FILE}"
-            
-            # Next: portion NOT multimapped with <=2 mismatches out of 100 expected length
-            printf "${GRAPH_NAME}\t" >> "${MULTIMAPPING_FILE}"
-            # We need the 0 + in case there are no sufficiently good mappings
-            cat "${JSON_FILE}" | jq -r '1 - ((0 + .secondary_mismatches."0" + .secondary_mismatches."1" + .secondary_mismatches."2") / .total_reads)' >> "${MULTIMAPPING_FILE}"
-            
-            # Next: runtime in seconds
-            printf "${GRAPH_NAME}\t" >> "${RUNTIME_FILE}"
-            cat "${JSON_FILE}" | jq -r '.run_time' >> "${RUNTIME_FILE}"
-        done
-    done
+    # TODO: you need to run collateStatistics.py to build the per-region-and-
+    # graph stats files. We expect them to exist and only concatenate the final
+    # overall files and make the plots.
     
     ./boxplot.py "${MAPPING_FILE}" \
-        --title "$(printf "Well-mapped (<=2 mismatches)\nreads in ${REGION^^}")" \
-        --x_label "Graph" --y_label "Portion Well-mapped" --save "${MAPPING_PLOT}" \
-        --x_sideways \
-        "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90
+        --title "$(printf "Mapped (<=2 mismatches)\nreads in ${REGION^^}")" \
+        --x_label "Graph" --y_label "Portion mapped" --save "${MAPPING_PLOT}" \
+        --x_sideways --hline_median trivial \
+        "${PLOT_PARAMS[@]}"
         
-    ./boxplot.py "${MULTIMAPPING_FILE}" \
-        --title "$(printf "Not-well-multimapped\n(>2 mismatches or unmultimapped)\nreads in ${REGION^^}")" \
-        --x_label "Graph" --y_label "Portion not-well-multimapped" --save "${MULTIMAPPING_PLOT}" \
-        --x_sideways \
-        "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90
+    ./boxplot.py "${PERFECT_FILE}" \
+        --title "$(printf "Perfectly mapped\nreads in ${REGION^^}")" \
+        --x_label "Graph" --y_label "Portion perfectly mapped" --save "${PERFECT_PLOT}" \
+        --x_sideways --hline_median trivial \
+        "${PLOT_PARAMS[@]}"
+        
+    ./boxplot.py "${ONE_ERROR_FILE}" \
+        --title "$(printf "One-error (<=1 mismatch)\nreads in ${REGION^^}")" \
+        --x_label "Graph" --y_label "Portion" --save "${ONE_ERROR_PLOT}" \
+        --x_sideways --hline_median trivial \
+        "${PLOT_PARAMS[@]}"
+        
+    ./boxplot.py "${SINGLE_MAPPING_FILE}" \
+        --title "$(printf "Uniquely mapped (<=2 mismatches)\nreads in ${REGION^^}")" \
+        --x_label "Graph" --y_label "Portion uniquely mapped" --save "${SINGLE_MAPPING_PLOT}" \
+        --x_sideways --hline_median refonly \
+        "${PLOT_PARAMS[@]}"
         
     ./boxplot.py "${RUNTIME_FILE}" \
-        --title "$(printf "Aligner runtime\n in ${REGION^^}")" \
-        --x_label "Graph" --y_label "Runtime per sample (seconds)" --save "${RUNTIME_PLOT}" \
-        --x_sideways \
-        "${PLOT_PARAMS[@]}" \
-        --font_size 20 --dpi 90
+        --title "$(printf "Per-read runtime\n in ${REGION^^}")" \
+        --x_label "Graph" --y_label "Runtime per read (seconds)" --save "${RUNTIME_PLOT}" \
+        --x_sideways --max_max 0.006 \
+        "${PLOT_PARAMS[@]}"
     
 done
 
 # Aggregate the overall files
 cat "${PLOTS_DIR}"/mapping.*.tsv > "${OVERALL_MAPPING_FILE}"
-cat "${PLOTS_DIR}"/multimapping.*.tsv > "${OVERALL_MULTIMAPPING_FILE}"
+cat "${PLOTS_DIR}"/perfect.*.tsv > "${OVERALL_PERFECT_FILE}"
+cat "${PLOTS_DIR}"/oneerror.*.tsv > "${OVERALL_ONE_ERROR_FILE}"
+cat "${PLOTS_DIR}"/singlemapping.*.tsv > "${OVERALL_SINGLE_MAPPING_FILE}"
 
 # Make the overall plots
 ./boxplot.py "${OVERALL_MAPPING_FILE}" \
-    --title "$(printf "Well-mapped\n(<=2 mismatches)\nreads")" \
-    --x_label "Graph" --y_label "Portion Well-mapped" --save "${OVERALL_MAPPING_PLOT}" \
-    --x_sideways \
-    "${PLOT_PARAMS[@]}" \
-    --font_size 20 --dpi 90
-        
-./boxplot.py "${OVERALL_MULTIMAPPING_FILE}" \
-    --title "$(printf "Not-well-multimapped\n(>2 mismatches or unmultimapped)\nreads")" \
-    --x_label "Graph" --y_label "Portion not-well-multimapped" --save "${OVERALL_MULTIMAPPING_PLOT}" \
-    --x_sideways \
-    "${PLOT_PARAMS[@]}" \
-    --font_size 20 --dpi 90
+    --title "$(printf "Mapped (<=2 mismatches)\nreads")" \
+    --x_label "Graph" --y_label "Portion mapped" --save "${OVERALL_MAPPING_PLOT}" \
+    --x_sideways  --hline_median trivial \
+    "${PLOT_PARAMS[@]}"
+    
+./boxplot.py "${OVERALL_PERFECT_FILE}" \
+    --title "$(printf "Perfectly mapped\nreads")" \
+    --x_label "Graph" --y_label "Portion perfectly mapped" --save "${OVERALL_PERFECT_PLOT}" \
+    --x_sideways --hline_median trivial \
+    "${PLOT_PARAMS[@]}"
+    
+./boxplot.py "${OVERALL_ONE_ERROR_FILE}" \
+    --title "$(printf "One-error (<=1 mismatch)\nreads")" \
+    --x_label "Graph" --y_label "Portion" --save "${OVERALL_ONE_ERROR_PLOT}" \
+    --x_sideways --hline_median trivial \
+    "${PLOT_PARAMS[@]}"
+
+./boxplot.py "${OVERALL_SINGLE_MAPPING_FILE}" \
+    --title "$(printf "Uniquely mapped (<=2 mismatches)\nreads")" \
+    --x_label "Graph" --y_label "Portion uniquely mapped" --save "${OVERALL_SINGLE_MAPPING_PLOT}" \
+    --x_sideways --hline_median refonly \
+    "${PLOT_PARAMS[@]}"
 
